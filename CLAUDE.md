@@ -543,9 +543,165 @@ Example: 10 cities, 13 queries, 1 page
 - Flask interface (`app_flask_v2.py`) - kept but not maintained
 - Hardcoded city lists in countries.py (now AI-selected)
 
+---
+
+## Recent Updates (February 21, 2026)
+
+### Major Feature: Data Loss Prevention & Supabase Migration Plan
+
+**Status:** 🟡 IN PROGRESS (Phase 1/7 Complete)
+
+#### What Was Added:
+
+**1. Checkpoint System (COMPLETED - February 21)**
+- **Problem**: 1200 API call search lost all data when computer slept (CSV only saves at end)
+- **Solution**: Auto-save checkpoint every 50 results to prevent data loss
+- **Files Modified**:
+  - `serper_search_v2.py` (lines 28-46, 305-357) - Added checkpoint system
+  - `serper_maps.py` (lines 26-41, 234-288) - Added checkpoint system
+- **How It Works**:
+  ```python
+  # In __init__:
+  self.enable_checkpoints = True
+  self.checkpoint_interval = 50  # Save every 50 results
+
+  # After every search:
+  self.check_and_save_checkpoint()  # Auto-saves if 50+ new results
+
+  # Creates: results/checkpoint_search_TIMESTAMP.csv
+  ```
+- **Protection**: If computer sleeps, max 49 results lost (not 1200)
+- **Output Files**:
+  - `results/checkpoint_search_YYYYMMDD_HHMMSS.csv` (incremental saves)
+  - `results/checkpoint_maps_YYYYMMDD_HHMMSS.csv` (incremental saves)
+
+**2. Supabase Cloud Migration (PLANNED - 1 Week Implementation)**
+
+**Goal**: Production-ready SaaS infrastructure with zero data loss risk
+
+**Architecture Decision**:
+- **User Choice**: Tier 3 (Supabase Cloud) - SaaS-ready from day 1
+- **Timeline**: 3-6 months to SaaS launch
+- **Why Supabase**:
+  - PostgreSQL database (unlimited search history)
+  - Cloud storage (automatic CSV backups)
+  - Built-in auth (multi-user ready)
+  - Free tier: 500MB database (enough for ~1M results)
+  - Paid tier: $25/mo (8GB database, production-ready)
+
+**Implementation Plan (7 Phases)**:
+
+| Phase | Task | Duration | Status |
+|-------|------|----------|--------|
+| 1 | Checkpoint System (temporary protection) | 30 min | ✅ DONE |
+| 2 | Supabase account + project setup | 1 hour | 🔜 NEXT |
+| 3 | Database schema (searches + results tables) | 2 hours | ⏳ Pending |
+| 4 | Python integration (cloud_storage.py) | 1 day | ⏳ Pending |
+| 5 | Streamlit UI updates (past searches) | 4 hours | ⏳ Pending |
+| 6 | Testing & Streamlit Cloud deploy | 1 day | ⏳ Pending |
+| 7 | Documentation & GitHub push | 2 hours | ⏳ Pending |
+
+**Database Schema (PostgreSQL)**:
+```sql
+-- searches table
+CREATE TABLE searches (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES auth.users(id),
+    sector TEXT,
+    countries JSONB,
+    status TEXT CHECK (status IN ('running', 'completed', 'failed')),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    total_results INTEGER,
+    api_calls_used INTEGER
+);
+
+-- results table
+CREATE TABLE results (
+    id BIGSERIAL PRIMARY KEY,
+    search_id UUID REFERENCES searches(id),
+    domain TEXT,
+    url TEXT,
+    business_name TEXT,
+    phone TEXT,
+    address TEXT,
+    rating NUMERIC(2,1),
+    city TEXT,
+    country TEXT,
+    query TEXT,
+    created_at TIMESTAMPTZ
+);
+
+-- Indexes for performance
+CREATE INDEX idx_results_search_id ON results(search_id);
+CREATE INDEX idx_results_domain ON results(domain);
+```
+
+**New Files (To Be Created)**:
+- `config/supabase_config.py` - Supabase connection settings
+- `cloud_storage.py` - Supabase operations (insert, export, upload)
+- `requirements.txt` - Add `supabase>=2.0.0`
+
+**Streamlit Features (To Be Added)**:
+- Sidebar: "Past Searches" list with download buttons
+- Real-time progress tracking (searches update live in database)
+- Search recovery (resume interrupted searches)
+- CSV download from cloud storage (never lose exports)
+
+**Cost Breakdown**:
+- **Free tier**: 500MB database + 1GB storage (covers ~50 campaigns of 1200 calls each)
+- **Pro tier**: $25/mo when exceeding free tier (estimated 6+ months of heavy use)
+- **Zero cost for development**: Local SQLite fallback if Supabase unavailable
+
+**Data Safety Comparison**:
+
+| Method | Data Loss Risk | Computer Sleep Safe | SaaS Ready | Cost |
+|--------|---------------|---------------------|------------|------|
+| **Original (no checkpoint)** | 100% if interrupted | ❌ No | ❌ No | $0 |
+| **Checkpoint (current)** | ~5% (last 49 results) | ⚠️ Mostly | ❌ No | $0 |
+| **Supabase (planned)** | 0% | ✅ Yes | ✅ Yes | $0-25/mo |
+
+---
+
+## Current System State (February 21, 2026)
+
+**Working Features:**
+- ✅ 174-country support with AI city selection
+- ✅ AI query generation with OpenAI GPT-4o-mini
+- ✅ 87-site exclusion list (marketplaces, B2B directories, chambers)
+- ✅ Search API with pagination (1-10 pages per query)
+- ✅ Maps API integration with pagination (1-10 pages per query)
+- ✅ Three search modes (Both/Search Only/Maps Only)
+- ✅ Combined CSV export with all fields
+- ✅ Query/city selection UI with checkboxes
+- ✅ Saved plans feature (JSON persistence)
+- ✅ **NEW: Checkpoint system (auto-save every 50 results)**
+
+**Active Components:**
+- `app.py` - Streamlit UI (primary interface) - Port 8501
+- `serper_search_v2.py` - Search API with exclusions + checkpoints
+- `serper_maps.py` - Maps API for local businesses + checkpoints
+- `ai_query_generator_v2.py` - OpenAI query generation
+- `config/exclusions.py` - 87-site filter list
+- `config/countries.py` - 174-country database
+
+**In Development:**
+- 🔄 Supabase cloud integration (Phase 2/7 starting)
+- 🔄 PostgreSQL database for search history
+- 🔄 Cloud storage for CSV backups
+
+**Deprecated/Removed:**
+- Flask interface (`app_flask_v2.py`) - kept but not maintained
+- Hardcoded city lists in countries.py (now AI-selected)
+
+**GitHub Repository:**
+- https://github.com/ssalihyetim/serper-lead-gen (private)
+- Deployed to Streamlit Cloud: TBD (pending Supabase setup)
+
 **Next Chat Context:**
 If starting a fresh chat, focus areas should be:
-1. User testing results and feedback
-2. Performance optimization for large-scale searches
-3. Data quality improvements (deduplication, validation)
-4. Cost optimization strategies
+1. ✅ ~~Data loss prevention~~ - Checkpoint system implemented
+2. 🔄 Supabase cloud setup (Phase 2: Account creation & project setup)
+3. 🔄 Database schema implementation (Phase 3)
+4. 🔄 Python cloud_storage.py integration (Phase 4)
+5. Future: Multi-user auth & SaaS launch (3-6 months)

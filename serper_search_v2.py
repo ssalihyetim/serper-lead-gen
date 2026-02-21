@@ -25,7 +25,7 @@ from utils.deduplicator import Deduplicator
 class EnhancedSerperSearcher:
     """Enhanced searcher with location and comprehensive query support"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, enable_checkpoints: bool = True):
         self.api_key = api_key
         self.base_url = "https://google.serper.dev/search"
         self.autocomplete_url = "https://google.serper.dev/autocomplete"
@@ -37,6 +37,12 @@ class EnhancedSerperSearcher:
         self.all_results: List[Dict] = []
         self.api_call_count = 0
         self.related_searches: Dict[str, List[str]] = {}  # Store related searches by query
+
+        # Checkpoint system for data loss prevention
+        self.enable_checkpoints = enable_checkpoints
+        self.checkpoint_file = None
+        self.checkpoint_interval = 50  # Save every 50 results
+        self.last_checkpoint_count = 0
 
     def search(self, query: str, gl: str = "us", hl: str = "en", num: int = 10, page: int = 1) -> Dict:
         """
@@ -227,6 +233,9 @@ class EnhancedSerperSearcher:
         if not silent:
             print(f"      → Found {page_results} new results")
 
+        # Check if checkpoint should be saved
+        self.check_and_save_checkpoint()
+
         return page_results
 
     def search_keyword_multi_location(self, keyword: str, cities: List[Dict],
@@ -296,6 +305,55 @@ class EnhancedSerperSearcher:
         print(f"API calls made: {self.api_call_count}")
         print(f"{'='*70}\n")
 
+    def save_checkpoint(self):
+        """
+        Save results to checkpoint file incrementally
+        Prevents data loss if process crashes or computer sleeps
+        """
+        if not self.enable_checkpoints:
+            return
+
+        if not self.all_results:
+            return
+
+        # Initialize checkpoint file on first save
+        if not self.checkpoint_file:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.checkpoint_file = f"results/checkpoint_search_{timestamp}.csv"
+            os.makedirs("results", exist_ok=True)
+
+        # Determine which results are new since last checkpoint
+        new_results = self.all_results[self.last_checkpoint_count:]
+
+        if not new_results:
+            return
+
+        fieldnames = ['domain', 'url', 'title', 'description', 'source_type', 'query', 'city', 'position']
+        file_exists = os.path.exists(self.checkpoint_file)
+
+        try:
+            with open(self.checkpoint_file, 'a', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerows(new_results)
+
+            self.last_checkpoint_count = len(self.all_results)
+            print(f"      💾 Checkpoint saved: {len(new_results)} new results ({len(self.all_results)} total)")
+
+        except Exception as e:
+            print(f"      ⚠️  Checkpoint save failed: {e}")
+
+    def check_and_save_checkpoint(self):
+        """Check if checkpoint should be saved based on interval"""
+        if not self.enable_checkpoints:
+            return
+
+        results_since_checkpoint = len(self.all_results) - self.last_checkpoint_count
+
+        if results_since_checkpoint >= self.checkpoint_interval:
+            self.save_checkpoint()
+
     def export_to_csv(self, filename: str = None):
         """
         Export all results to CSV
@@ -303,6 +361,10 @@ class EnhancedSerperSearcher:
         Args:
             filename: Output filename (default: auto-generated with timestamp)
         """
+        # Save final checkpoint before export
+        if self.enable_checkpoints:
+            self.save_checkpoint()
+
         if not self.all_results:
             print("\n⚠️  No results to export!")
             return
@@ -323,6 +385,11 @@ class EnhancedSerperSearcher:
                 writer.writerows(self.all_results)
 
             print(f"\n✓ Successfully exported {len(self.all_results)} results to '{filename}'")
+
+            # Show checkpoint file info if exists
+            if self.checkpoint_file and os.path.exists(self.checkpoint_file):
+                print(f"💾 Checkpoint file: '{self.checkpoint_file}' (can be deleted)")
+
             return filename
         except IOError as e:
             print(f"\n✗ Error writing to file: {e}")

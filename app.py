@@ -18,6 +18,7 @@ from config.countries import get_all_country_names, get_language_for_country
 from ai_query_generator_v2 import AIQueryGeneratorV2 as AIQueryGenerator
 from serper_search_v2 import EnhancedSerperSearcher
 from serper_maps import SerperMapsSearcher
+from cloud_storage import CloudStorage
 
 # Page configuration
 st.set_page_config(
@@ -74,6 +75,11 @@ if 'ai_plan' not in st.session_state:
 if 'search_results' not in st.session_state:
     st.session_state.search_results = None
 
+# Initialize cloud storage (shared across all steps)
+@st.cache_resource
+def get_cloud_storage():
+    return CloudStorage()
+
 
 def main():
     """Main application"""
@@ -129,6 +135,43 @@ def main():
                         st.rerun()
             else:
                 st.caption("No saved plans yet")
+
+        st.divider()
+
+        # Cloud Past Searches
+        st.header("☁️ Past Searches")
+        cs = get_cloud_storage()
+        if cs.available:
+            past_searches = cs.get_past_searches(limit=10)
+            if past_searches:
+                for s in past_searches:
+                    started = s.get('started_at', '')[:10] if s.get('started_at') else ''
+                    label = f"{started} | {s.get('sector','?')} | {s.get('total_results',0):,} results"
+                    with st.expander(label):
+                        st.caption(f"Status: {s.get('status','?')} | Search type: {s.get('search_type','?')}")
+                        countries_list = s.get('countries', [])
+                        if countries_list:
+                            st.caption(f"Countries: {', '.join(countries_list)}")
+                        if st.button(f"⬇️ Download CSV", key=f"dl_{s['id']}"):
+                            csv_data = cs.get_results_as_csv(s['id'])
+                            if csv_data:
+                                st.download_button(
+                                    label="📥 Save CSV",
+                                    data=csv_data,
+                                    file_name=f"results_{s['id'][:8]}.csv",
+                                    mime="text/csv",
+                                    key=f"save_{s['id']}"
+                                )
+                            else:
+                                st.warning("No results in cloud for this search.")
+            else:
+                st.caption("No cloud searches yet")
+
+            stats = cs.get_search_stats()
+            if stats:
+                st.caption(f"Total: {stats.get('total_searches',0)} searches, {stats.get('total_results',0):,} results")
+        else:
+            st.caption("Cloud storage offline")
 
         st.divider()
 
@@ -694,6 +737,15 @@ def show_execution_step(serper_key):
                 # Get search type
                 search_type = config.get('search_type', 'Both (Recommended)')
 
+                # Create cloud search session
+                cs = get_cloud_storage()
+                cloud_search_id = cs.create_search(
+                    sector=config.get('sector', ''),
+                    countries=config.get('countries', []),
+                    queries=[q.get('query_template') for q in selected_queries],
+                    search_type=search_type,
+                )
+
                 # Initialize searchers
                 searcher = None
                 maps_searcher = None
@@ -833,6 +885,18 @@ def show_execution_step(serper_key):
                 if searcher and searcher.related_searches:
                     searcher.export_related_searches()
 
+                # Save to Supabase cloud
+                if cloud_search_id and all_results:
+                    cs.save_results(cloud_search_id, all_results)
+                    cs.complete_search(
+                        cloud_search_id,
+                        total_results=len(all_results),
+                        api_calls_used=total_api_calls,
+                        csv_filename=os.path.basename(output_file) if all_results else None,
+                    )
+                elif cloud_search_id:
+                    cs.fail_search(cloud_search_id)
+
                 # Calculate duration
                 duration_seconds = time.time() - start_time
                 duration_minutes = duration_seconds / 60
@@ -855,7 +919,8 @@ def show_execution_step(serper_key):
                     'output_file': output_file,
                     'search_type': search_type,
                     'results_by_country': results_by_country,
-                    'results_data': all_results[:100]  # Store first 100 for preview
+                    'results_data': all_results[:100],  # Store first 100 for preview
+                    'cloud_search_id': cloud_search_id,
                 }
 
                 st.success(f"✅ Search completed in {duration_minutes:.1f} minutes! Found {len(all_results)} results")
@@ -939,6 +1004,11 @@ def show_results_step():
             file_name=f"lead_generation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv"
         )
+
+    # Cloud storage info
+    cloud_search_id = results.get('cloud_search_id')
+    if cloud_search_id:
+        st.info(f"☁️ Results saved to cloud (ID: `{cloud_search_id[:8]}...`). Accessible from sidebar → Past Searches.")
 
     if st.button("🔄 Start New Search"):
         for key in list(st.session_state.keys()):

@@ -23,7 +23,7 @@ from utils.deduplicator import Deduplicator
 class SerperMapsSearcher:
     """Google Maps business search via Serper API"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, enable_checkpoints: bool = True):
         self.api_key = api_key
         self.base_url = "https://google.serper.dev/maps"
         self.headers = {
@@ -33,6 +33,12 @@ class SerperMapsSearcher:
         self.deduplicator = Deduplicator()
         self.all_results: List[Dict] = []
         self.api_call_count = 0
+
+        # Checkpoint system for data loss prevention
+        self.enable_checkpoints = enable_checkpoints
+        self.checkpoint_file = None
+        self.checkpoint_interval = 50  # Save every 50 results
+        self.last_checkpoint_count = 0
 
     def search_maps(self, query: str, location: str = "", gl: str = "us",
                     hl: str = "en", page: int = 1) -> Dict:
@@ -187,6 +193,9 @@ class SerperMapsSearcher:
                 if not silent:
                     print(f"      ✓ Found {len(results)} new businesses")
 
+                # Check if checkpoint should be saved
+                self.check_and_save_checkpoint()
+
         return location_results
 
     def search_keyword_multi_location(self, keyword: str, cities: List[Dict],
@@ -225,6 +234,59 @@ class SerperMapsSearcher:
         print(f"API calls: {self.api_call_count}")
         print(f"{'='*70}\n")
 
+    def save_checkpoint(self):
+        """
+        Save results to checkpoint file incrementally
+        Prevents data loss if process crashes or computer sleeps
+        """
+        if not self.enable_checkpoints:
+            return
+
+        if not self.all_results:
+            return
+
+        # Initialize checkpoint file on first save
+        if not self.checkpoint_file:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.checkpoint_file = f"results/checkpoint_maps_{timestamp}.csv"
+            os.makedirs("results", exist_ok=True)
+
+        # Determine which results are new since last checkpoint
+        new_results = self.all_results[self.last_checkpoint_count:]
+
+        if not new_results:
+            return
+
+        fieldnames = [
+            'business_name', 'address', 'phone', 'website', 'domain',
+            'rating', 'review_count', 'category', 'city', 'query',
+            'place_id', 'source'
+        ]
+        file_exists = os.path.exists(self.checkpoint_file)
+
+        try:
+            with open(self.checkpoint_file, 'a', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerows(new_results)
+
+            self.last_checkpoint_count = len(self.all_results)
+            print(f"      💾 Checkpoint saved: {len(new_results)} new results ({len(self.all_results)} total)")
+
+        except Exception as e:
+            print(f"      ⚠️  Checkpoint save failed: {e}")
+
+    def check_and_save_checkpoint(self):
+        """Check if checkpoint should be saved based on interval"""
+        if not self.enable_checkpoints:
+            return
+
+        results_since_checkpoint = len(self.all_results) - self.last_checkpoint_count
+
+        if results_since_checkpoint >= self.checkpoint_interval:
+            self.save_checkpoint()
+
     def export_to_csv(self, filename: str = None):
         """
         Export Maps results to CSV
@@ -232,6 +294,10 @@ class SerperMapsSearcher:
         Args:
             filename: Output filename
         """
+        # Save final checkpoint before export
+        if self.enable_checkpoints:
+            self.save_checkpoint()
+
         if not self.all_results:
             print("\n⚠️  No results to export!")
             return

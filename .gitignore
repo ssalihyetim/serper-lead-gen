@@ -23,6 +23,12 @@ env/
 # Streamlit secrets (local only)
 .streamlit/secrets.toml
 
+# Supabase config (contains keys - use Streamlit secrets instead)
+config/supabase_config.py
+
+# MCP local config
+.mcp.json
+
 # Output files (generated at runtime)
 results/
 saved_plans/
