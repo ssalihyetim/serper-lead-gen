@@ -24,10 +24,16 @@ Usage:
 """
 
 import os
+import sys
 from datetime import datetime
 from typing import Optional
 import csv
 import io
+
+# Ensure project root is in path so config imports work regardless of cwd
+_project_root = os.path.dirname(os.path.abspath(__file__))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 try:
     from supabase import create_client, Client
@@ -35,17 +41,28 @@ try:
 except ImportError:
     SUPABASE_AVAILABLE = False
 
+SUPABASE_URL = ""
+SUPABASE_ANON_KEY = ""
+
+# Priority 1: config file (local dev)
 try:
     from config.supabase_config import SUPABASE_URL, SUPABASE_ANON_KEY
 except ImportError:
-    # Try Streamlit secrets first, then environment variables
+    pass
+
+# Priority 2: Streamlit secrets (cloud deploy)
+if not SUPABASE_URL:
     try:
         import streamlit as st
         SUPABASE_URL = st.secrets.get("SUPABASE_URL", "")
         SUPABASE_ANON_KEY = st.secrets.get("SUPABASE_ANON_KEY", "")
     except Exception:
-        SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-        SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+        pass
+
+# Priority 3: environment variables
+if not SUPABASE_URL:
+    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+    SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 
 class CloudStorage:
