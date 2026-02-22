@@ -806,10 +806,12 @@ def show_execution_step(serper_key):
                             query_template = query.get('query_template', '')
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
+                            # Append city name so Google returns city-specific results
+                            query_with_city = f"{query_text} {city_name}"
 
                             for page_num in range(1, pages_per_query + 1):
                                 searcher.search_single_query(
-                                    query=query_text,
+                                    query=query_with_city,
                                     gl=country.lower(),
                                     hl='en',
                                     total_results=10,
@@ -837,10 +839,12 @@ def show_execution_step(serper_key):
                             query_template = query.get('query_template', '')
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
+                            # Append city name so Maps returns city-specific results
+                            query_with_city = f"{query_text} {city_name}"
 
                             for page_num in range(1, pages_per_query + 1):
                                 response = maps_searcher.search_maps(
-                                    query=query_text,
+                                    query=query_with_city,
                                     location=f"{city_name}, {country}",
                                     gl=country.lower(),
                                     hl='en',
