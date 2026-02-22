@@ -297,7 +297,10 @@ def show_configuration_step(openai_key, serper_key):
         ai_model = st.selectbox(
             "Model for Query Generation",
             options=[
-                # GPT-4.1 family (latest, April 2025)
+                # GPT-5 family (latest)
+                "gpt-5",
+                "gpt-5-mini",
+                # GPT-4.1 family (April 2025)
                 "gpt-4.1",
                 "gpt-4.1-mini",
                 "gpt-4.1-nano",
@@ -311,6 +314,8 @@ def show_configuration_step(openai_key, serper_key):
             ],
             index=0,
             help=(
+                "GPT-5: Most capable model | "
+                "GPT-5 mini: Fast & capable | "
                 "GPT-4.1: Best instruction-following, 1M context (~$0.08/1K) | "
                 "GPT-4.1 mini: Fast & balanced (~$0.02/1K) | "
                 "GPT-4.1 nano: Fastest & cheapest (~$0.005/1K) | "
