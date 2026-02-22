@@ -777,6 +777,12 @@ def show_execution_step(serper_key):
                 total_tasks = search_tasks + maps_tasks
                 completed = 0
 
+                # Incremental Supabase save: flush new results after each city
+                def flush_to_cloud(new_results_batch):
+                    if cloud_search_id and cs.available and new_results_batch:
+                        cs.save_results(cloud_search_id, new_results_batch)
+                        cs.update_search_count(cloud_search_id, completed)
+
                 # Phase 1: Execute Search API (if enabled)
                 if searcher:
                     status_text.text("Phase 1: Search API...")
@@ -784,6 +790,7 @@ def show_execution_step(serper_key):
                     for city_info in all_cities:
                         city_name = city_info['city']
                         country = city_info['country']
+                        city_results_before = len(searcher.all_results)
 
                         status_text.text(f"Search API: {city_name}, {country}...")
 
@@ -796,7 +803,6 @@ def show_execution_step(serper_key):
 
                             # Execute search for each page
                             for page_num in range(1, pages_per_query + 1):
-                                # Search with pagination
                                 searcher.search_single_query(
                                     query=query_text,
                                     gl=country.lower(),
@@ -808,7 +814,11 @@ def show_execution_step(serper_key):
 
                                 completed += 1
                                 progress_bar.progress(completed / total_tasks)
-                                status_text.text(f"Search API: {city_name}, {country}... (Page {page_num}/{pages_per_query})")
+                                status_text.text(f"Search API: {city_name}, {country}... ({completed}/{total_tasks})")
+
+                        # Flush this city's new results to Supabase
+                        new_batch = searcher.all_results[city_results_before:]
+                        flush_to_cloud(new_batch)
 
                 # Phase 2: Execute Maps API (if enabled)
                 if maps_searcher:
@@ -817,6 +827,7 @@ def show_execution_step(serper_key):
                     for city_info in all_cities:
                         city_name = city_info['city']
                         country = city_info['country']
+                        city_results_before = len(maps_searcher.all_results)
 
                         status_text.text(f"Maps API: {city_name}, {country}...")
 
@@ -840,14 +851,18 @@ def show_execution_step(serper_key):
                                 if response:
                                     places = response.get('places', [])
                                     if places:
-                                        results = maps_searcher.extract_maps_results(
+                                        batch = maps_searcher.extract_maps_results(
                                             places, query_text, f"{city_name}, {country}"
                                         )
-                                        maps_searcher.all_results.extend(results)
+                                        maps_searcher.all_results.extend(batch)
 
                                 completed += 1
                                 progress_bar.progress(completed / total_tasks)
-                                status_text.text(f"Maps API: {city_name}, {country}... (Page {page_num}/{pages_per_query})")
+                                status_text.text(f"Maps API: {city_name}, {country}... ({completed}/{total_tasks})")
+
+                        # Flush this city's new results to Supabase
+                        new_batch = maps_searcher.all_results[city_results_before:]
+                        flush_to_cloud(new_batch)
 
                 # Merge and export results
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -885,17 +900,14 @@ def show_execution_step(serper_key):
                 if searcher and searcher.related_searches:
                     searcher.export_related_searches()
 
-                # Save to Supabase cloud
-                if cloud_search_id and all_results:
-                    cs.save_results(cloud_search_id, all_results)
+                # Mark search as complete in Supabase (results already saved incrementally per city)
+                if cloud_search_id:
                     cs.complete_search(
                         cloud_search_id,
                         total_results=len(all_results),
                         api_calls_used=total_api_calls,
                         csv_filename=os.path.basename(output_file) if all_results else None,
                     )
-                elif cloud_search_id:
-                    cs.fail_search(cloud_search_id)
 
                 # Calculate duration
                 duration_seconds = time.time() - start_time
@@ -928,7 +940,25 @@ def show_execution_step(serper_key):
                 st.rerun()
 
             except Exception as e:
-                st.error(f"Error during search execution: {e}")
+                # Mark search as interrupted in Supabase so partial results are visible
+                if 'cloud_search_id' in dir() and cloud_search_id:
+                    try:
+                        # Collect whatever was gathered before the crash
+                        partial_results = []
+                        if 'searcher' in dir() and searcher:
+                            partial_results.extend(searcher.all_results)
+                        if 'maps_searcher' in dir() and maps_searcher:
+                            partial_results.extend(maps_searcher.all_results)
+                        cs.complete_search(
+                            cloud_search_id,
+                            total_results=len(partial_results),
+                            api_calls_used=getattr(searcher, 'api_call_count', 0) + getattr(maps_searcher, 'api_call_count', 0),
+                            status='interrupted',
+                        )
+                    except Exception:
+                        pass
+                st.error(f"❌ Search interrupted: {e}")
+                st.warning("⚠️ Partial results (if any) have been saved to cloud. Check Past Searches in the sidebar.")
                 import traceback
                 st.code(traceback.format_exc())
 
