@@ -777,11 +777,20 @@ def show_execution_step(serper_key):
                 total_tasks = search_tasks + maps_tasks
                 completed = 0
 
-                # Incremental Supabase save: flush new results after each city
-                def flush_to_cloud(new_results_batch):
-                    if cloud_search_id and cs.available and new_results_batch:
-                        cs.save_results(cloud_search_id, new_results_batch)
-                        cs.update_search_count(cloud_search_id, completed)
+                # Flush city results to Supabase then CLEAR from RAM
+                total_saved_count = 0
+
+                def flush_and_clear(results_list):
+                    """Save batch to Supabase and clear from RAM to prevent memory buildup."""
+                    nonlocal total_saved_count
+                    if not results_list:
+                        return
+                    if cloud_search_id and cs.available:
+                        cs.save_results(cloud_search_id, results_list)
+                        total_saved_count += len(results_list)
+                        cs.update_search_count(cloud_search_id, total_saved_count)
+                    # Always clear from RAM regardless of cloud availability
+                    del results_list[:]
 
                 # Phase 1: Execute Search API (if enabled)
                 if searcher:
@@ -790,18 +799,14 @@ def show_execution_step(serper_key):
                     for city_info in all_cities:
                         city_name = city_info['city']
                         country = city_info['country']
-                        city_results_before = len(searcher.all_results)
 
                         status_text.text(f"Search API: {city_name}, {country}...")
 
                         for query in selected_queries:
                             query_template = query.get('query_template', '')
-
-                            # Get translation
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
 
-                            # Execute search for each page
                             for page_num in range(1, pages_per_query + 1):
                                 searcher.search_single_query(
                                     query=query_text,
@@ -811,14 +816,12 @@ def show_execution_step(serper_key):
                                     city=f"{city_name}, {country}",
                                     silent=True
                                 )
-
                                 completed += 1
                                 progress_bar.progress(completed / total_tasks)
                                 status_text.text(f"Search API: {city_name}, {country}... ({completed}/{total_tasks})")
 
-                        # Flush this city's new results to Supabase
-                        new_batch = searcher.all_results[city_results_before:]
-                        flush_to_cloud(new_batch)
+                        # Flush city results to cloud + clear from RAM
+                        flush_and_clear(searcher.all_results)
 
                 # Phase 2: Execute Maps API (if enabled)
                 if maps_searcher:
@@ -827,18 +830,14 @@ def show_execution_step(serper_key):
                     for city_info in all_cities:
                         city_name = city_info['city']
                         country = city_info['country']
-                        city_results_before = len(maps_searcher.all_results)
 
                         status_text.text(f"Maps API: {city_name}, {country}...")
 
                         for query in selected_queries:
                             query_template = query.get('query_template', '')
-
-                            # Get translation
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
 
-                            # Execute Maps search with pagination
                             for page_num in range(1, pages_per_query + 1):
                                 response = maps_searcher.search_maps(
                                     query=query_text,
@@ -847,7 +846,6 @@ def show_execution_step(serper_key):
                                     hl='en',
                                     page=page_num
                                 )
-
                                 if response:
                                     places = response.get('places', [])
                                     if places:
@@ -860,105 +858,72 @@ def show_execution_step(serper_key):
                                 progress_bar.progress(completed / total_tasks)
                                 status_text.text(f"Maps API: {city_name}, {country}... ({completed}/{total_tasks})")
 
-                        # Flush this city's new results to Supabase
-                        new_batch = maps_searcher.all_results[city_results_before:]
-                        flush_to_cloud(new_batch)
+                        # Flush city results to cloud + clear from RAM
+                        flush_and_clear(maps_searcher.all_results)
 
-                # Merge and export results
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                all_results = []
+                # All results were flushed to Supabase per city and cleared from RAM.
+                # Use total_saved_count for stats; download comes from cloud.
                 total_api_calls = 0
-
                 if searcher:
-                    all_results.extend(searcher.all_results)
                     total_api_calls += searcher.api_call_count
-
                 if maps_searcher:
-                    all_results.extend(maps_searcher.all_results)
                     total_api_calls += maps_searcher.api_call_count
-
-                # Export combined results
-                output_file = f"results/streamlit_results_{timestamp}.csv"
-
-                if all_results:
-                    import csv
-                    os.makedirs('results', exist_ok=True)
-
-                    # Determine all possible fields
-                    all_fields = set()
-                    for result in all_results:
-                        all_fields.update(result.keys())
-
-                    fieldnames = sorted(list(all_fields))
-
-                    with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                        writer.writeheader()
-                        writer.writerows(all_results)
 
                 # Also export related searches if any (Search API only)
                 if searcher and searcher.related_searches:
                     searcher.export_related_searches()
 
-                # Mark search as complete in Supabase (results already saved incrementally per city)
+                # Mark search as complete in Supabase
                 if cloud_search_id:
                     cs.complete_search(
                         cloud_search_id,
-                        total_results=len(all_results),
+                        total_results=total_saved_count,
                         api_calls_used=total_api_calls,
-                        csv_filename=os.path.basename(output_file) if all_results else None,
                     )
 
                 # Calculate duration
                 duration_seconds = time.time() - start_time
                 duration_minutes = duration_seconds / 60
 
-                # Count unique domains
-                unique_domains = len(set(r.get('domain', '') for r in all_results if r.get('domain')))
+                # results_by_country: approximate from cloud (avoid re-fetching all rows)
+                results_by_country = {c: len(cities) for c, cities in
+                                      {ci['country']: [ci for ci in all_cities
+                                                        if ci['country'] == c]
+                                       for c in set(ci['country'] for ci in all_cities)}.items()}
 
-                # Count results by country
-                results_by_country = {}
-                for result in all_results:
-                    country = result.get('country', result.get('city', 'Unknown')).split(',')[-1].strip()
-                    results_by_country[country] = results_by_country.get(country, 0) + 1
+                output_file = None  # Results are in cloud, not local file
 
-                # Store results
+                # Store only lightweight summary in session state (no bulk result data)
                 st.session_state.search_results = {
-                    'total_results': len(all_results),
-                    'unique_domains': unique_domains,
+                    'total_results': total_saved_count,
                     'api_calls_used': total_api_calls,
                     'duration_minutes': duration_minutes,
-                    'output_file': output_file,
                     'search_type': search_type,
                     'results_by_country': results_by_country,
-                    'results_data': all_results[:100],  # Store first 100 for preview
                     'cloud_search_id': cloud_search_id,
                 }
 
-                st.success(f"✅ Search completed in {duration_minutes:.1f} minutes! Found {len(all_results)} results")
+                st.success(f"✅ Search completed in {duration_minutes:.1f} minutes! Found {total_saved_count:,} results")
                 st.session_state.step = 5
                 st.rerun()
 
             except Exception as e:
-                # Mark search as interrupted in Supabase so partial results are visible
-                if 'cloud_search_id' in dir() and cloud_search_id:
+                # Mark search as interrupted; results flushed per-city are already in Supabase
+                if 'cloud_search_id' in locals() and cloud_search_id:
                     try:
-                        # Collect whatever was gathered before the crash
-                        partial_results = []
-                        if 'searcher' in dir() and searcher:
-                            partial_results.extend(searcher.all_results)
-                        if 'maps_searcher' in dir() and maps_searcher:
-                            partial_results.extend(maps_searcher.all_results)
+                        saved_so_far = locals().get('total_saved_count', 0)
+                        api_so_far = getattr(locals().get('searcher'), 'api_call_count', 0) + \
+                                     getattr(locals().get('maps_searcher'), 'api_call_count', 0)
                         cs.complete_search(
                             cloud_search_id,
-                            total_results=len(partial_results),
-                            api_calls_used=getattr(searcher, 'api_call_count', 0) + getattr(maps_searcher, 'api_call_count', 0),
+                            total_results=saved_so_far,
+                            api_calls_used=api_so_far,
                             status='interrupted',
                         )
                     except Exception:
                         pass
                 st.error(f"❌ Search interrupted: {e}")
-                st.warning("⚠️ Partial results (if any) have been saved to cloud. Check Past Searches in the sidebar.")
+                st.warning("⚠️ Results saved up to the last completed city are in cloud. Check Past Searches in the sidebar.")
                 import traceback
                 st.code(traceback.format_exc())
 
@@ -982,63 +947,54 @@ def show_results_step():
     st.info(f"🔍 Search Type: **{search_type}**")
 
     # Metrics
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-        st.metric("Total Results", f"{results['total_results']:,}")
+        st.metric("Total Results Saved", f"{results['total_results']:,}")
 
     with col2:
-        st.metric("Unique Domains", f"{results['unique_domains']:,}")
-
-    with col3:
         st.metric("API Calls Used", f"{results['api_calls_used']:,}")
 
-    with col4:
+    with col3:
         st.metric("Duration", f"{results['duration_minutes']:.1f} min")
 
     st.divider()
 
-    # Results by country
-    st.subheader("📊 Results by Country")
-
-    results_df = pd.DataFrame([
-        {'Country': country, 'Results': count}
-        for country, count in results['results_by_country'].items()
-    ])
-
-    st.bar_chart(results_df.set_index('Country'))
+    # Results by country (city count approximation)
+    st.subheader("📊 Cities Searched by Country")
+    results_by_country = results.get('results_by_country', {})
+    if results_by_country:
+        results_df = pd.DataFrame([
+            {'Country': country, 'Cities': count}
+            for country, count in results_by_country.items()
+        ])
+        st.bar_chart(results_df.set_index('Country'))
 
     st.divider()
 
-    # Download
+    # Download from cloud
     st.subheader("📥 Download Results")
-
-    # Download real CSV if available
-    output_file = results.get('output_file')
-    if output_file and os.path.exists(output_file):
-        with open(output_file, 'r') as f:
-            csv_data = f.read()
-
-        st.download_button(
-            label="📥 Download Full Results CSV",
-            data=csv_data,
-            file_name=f"lead_generation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-
-        st.success(f"Results saved to: {output_file}")
-    else:
-        st.download_button(
-            label="Download CSV (Demo)",
-            data="domain,url,title,country\nexample.com,https://example.com,Example,US\n",
-            file_name=f"lead_generation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-
-    # Cloud storage info
     cloud_search_id = results.get('cloud_search_id')
+
     if cloud_search_id:
-        st.info(f"☁️ Results saved to cloud (ID: `{cloud_search_id[:8]}...`). Accessible from sidebar → Past Searches.")
+        st.info(f"☁️ All results saved to cloud (ID: `{cloud_search_id[:8]}...`)")
+        cs = get_cloud_storage()
+        if cs.available:
+            with st.spinner("Fetching results from cloud..."):
+                csv_data = cs.get_results_as_csv(cloud_search_id)
+            if csv_data:
+                st.download_button(
+                    label="📥 Download Full Results CSV",
+                    data=csv_data,
+                    file_name=f"leads_{config.get('sector','results')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No results found in cloud for this search.")
+        else:
+            st.warning("Cloud storage offline - results may not be available.")
+    else:
+        st.warning("No cloud search ID found. Results may not have been saved.")
 
     if st.button("🔄 Start New Search"):
         for key in list(st.session_state.keys()):
