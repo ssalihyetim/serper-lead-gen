@@ -292,6 +292,20 @@ def show_configuration_step(openai_key, serper_key):
             help="Generate queries in the native language of each country"
         )
 
+        st.subheader("🤖 AI Model")
+
+        ai_model = st.selectbox(
+            "Model for Query Generation",
+            options=[
+                "gpt-4o-mini",
+                "gpt-4o",
+                "gpt-4-turbo",
+                "o1-mini",
+            ],
+            index=0,
+            help="gpt-4o-mini: Fast & cheap (~$0.01). gpt-4o: Smarter (~$0.10). gpt-4-turbo: Most capable (~$0.20). o1-mini: Best reasoning (~$0.15)."
+        )
+
         # Show selected cities preview
         if selected_countries:
             st.info(f"**Preview:** You'll search in {len(selected_countries)} countries × {cities_per_country} cities = {len(selected_countries) * cities_per_country} total cities")
@@ -324,13 +338,73 @@ def show_configuration_step(openai_key, serper_key):
             'countries': selected_countries,
             'cities_per_country': cities_per_country,
             'search_type': search_type,
-            'pages_per_query': pages_per_query,  # NEW: Pages to fetch per query
+            'pages_per_query': pages_per_query,
             'use_native_language': use_native_language,
+            'ai_model': ai_model,
             'openai_key': openai_key,
             'serper_key': serper_key
         }
         st.session_state.step = 2
         st.rerun()
+
+
+def build_prompt_preview(config: dict) -> str:
+    """Build the exact prompt that will be sent to the AI, for user preview."""
+    business_context = f"""Sector/Industry: {config['sector']}
+
+Target Customer Profile:
+{config['customer_profile']}"""
+
+    countries = config['countries']
+    cities_per_country = config['cities_per_country']
+    max_total_queries = config['max_queries']
+    use_native_language = config['use_native_language']
+
+    return f"""You are an expert B2B lead generation strategist specializing in search query optimization.
+
+**BUSINESS CONTEXT PROVIDED BY USER:**
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{business_context}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+**SEARCH PARAMETERS:**
+- Target Countries: {', '.join(countries)}
+- Cities per country: {cities_per_country}
+- Max total API queries: {max_total_queries}
+- Use native language per country: {use_native_language}
+
+**YOUR TASK:**
+
+**STEP 1: ANALYZE THE CONTEXT**
+Carefully read the business context above. Identify:
+- What sector/industry is the USER in? (what they sell)
+- Who is the TARGET CUSTOMER? (who they want to find)
+- What are the key characteristics, signals, and terminology of TARGET CUSTOMERS?
+- What should be prioritized? What should be avoided?
+
+**STEP 2: GENERATE SEARCH QUERIES**
+Create 15-25 highly targeted search query variations that will FIND the TARGET CUSTOMER.
+
+CRITICAL RULES:
+- Queries should find the TARGET CUSTOMER, NOT the user's sector
+- Use terminology and language patterns that TARGET CUSTOMERS use in their business
+- Include industry-specific terms, business types, and buying signals
+- Think: "How can I identify businesses matching this target customer profile?"
+
+**STEP 3: PRIORITIZE & EXPLAIN**
+For each query:
+- Assign priority: HIGH (strongest buyer signals), MEDIUM (relevant), LOW (exploratory)
+- Provide clear reasoning: WHY this query identifies the target customer
+- If native language enabled, provide accurate translations
+
+**STEP 4: SELECT CITIES**
+Recommend cities based on:
+- Target customer industry concentration (not just population)
+- Business hubs and clusters for this industry
+- Budget optimization within max_total_queries
+
+**STEP 5: EXPLAIN YOUR STRATEGY**
+Provide a detailed explanation covering: context interpretation, query choices, city selection, budget allocation."""
 
 
 def show_ai_generation_step(openai_key):
@@ -339,17 +413,23 @@ def show_ai_generation_step(openai_key):
     st.markdown('<div class="step-header">Step 2: AI Query Generation</div>', unsafe_allow_html=True)
 
     config = st.session_state.config
+    ai_model = config.get('ai_model', 'gpt-4o-mini')
 
-    st.info(f"🤖 AI is analyzing your requirements and generating optimized search queries for **{config['sector']}** across {len(config['countries'])} countries...")
+    st.info(f"🤖 Model: **{ai_model}** · Sector: **{config['sector']}** · {len(config['countries'])} countries")
+
+    # Show the exact prompt that will be sent
+    with st.expander("📄 View prompt being sent to AI", expanded=False):
+        st.caption("This is the exact prompt the AI will receive. You can go back to Step 1 to adjust your inputs before generating.")
+        st.code(build_prompt_preview(config), language="markdown")
 
     # Show configuration summary
     with st.expander("📋 Configuration Summary", expanded=False):
-        st.json(config)
+        st.json({k: v for k, v in config.items() if k not in ('openai_key', 'serper_key')})
 
     # Generate queries
     try:
-        with st.spinner("Generating AI query plan... This may take 10-30 seconds"):
-            generator = AIQueryGenerator(api_key=openai_key)
+        with st.spinner(f"Generating AI query plan with {ai_model}... This may take 10-30 seconds"):
+            generator = AIQueryGenerator(api_key=openai_key, model=ai_model)
 
             # Combine sector and customer_profile into business_context
             business_context = f"""Sector/Industry: {config['sector']}
