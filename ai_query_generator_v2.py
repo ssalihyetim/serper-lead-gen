@@ -233,9 +233,10 @@ Generate the complete strategy now:"""
 
         except Exception as e:
             import traceback
-            print(f"AI Generation Error: {e}")
-            traceback.print_exc()
-            return self._fallback_response(business_context, countries)
+            tb = traceback.format_exc()
+            print(f"AI Generation Error: {e}\n{tb}")
+            # Re-raise so the UI can show the real error instead of silently falling back
+            raise
 
     def optimize_queries(self,
                         initial_plan: Dict,
