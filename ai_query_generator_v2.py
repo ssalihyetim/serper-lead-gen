@@ -12,6 +12,9 @@ from openai import OpenAI
 class AIQueryGeneratorV2:
     """Generate and optimize search queries using AI with free-form context"""
 
+    # Models that don't support response_format or temperature
+    REASONING_MODELS = {"o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4-mini"}
+
     def __init__(self, api_key: str, model: str = "gpt-4.1-mini"):
         """
         Initialize AI query generator
@@ -22,6 +25,17 @@ class AIQueryGeneratorV2:
         """
         self.client = OpenAI(api_key=api_key)
         self.model = model
+
+    def _is_reasoning_model(self) -> bool:
+        return self.model in self.REASONING_MODELS
+
+    def _build_call_kwargs(self, messages: list, temperature: float) -> dict:
+        """Build API call kwargs compatible with both standard and reasoning models."""
+        kwargs = {"model": self.model, "messages": messages}
+        if not self._is_reasoning_model():
+            kwargs["temperature"] = temperature
+            kwargs["response_format"] = {"type": "json_object"}
+        return kwargs
 
     def generate_queries(self,
                         business_context: str,
@@ -185,17 +199,15 @@ Provide a detailed, human-readable explanation of:
 Generate the complete strategy now:"""
 
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert B2B lead generation strategist. Analyze business context deeply and create highly targeted search strategies. Always respond with valid, complete JSON."
+                },
+                {"role": "user", "content": prompt}
+            ]
             response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert B2B lead generation strategist. Analyze business context deeply and create highly targeted search strategies. Always respond with valid, complete JSON."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                response_format={"type": "json_object"}
+                **self._build_call_kwargs(messages, temperature=0.7)
             )
 
             result = json.loads(response.choices[0].message.content)
@@ -254,17 +266,15 @@ Provide updated JSON in the same complete format as before, including:
 Generate the revised plan:"""
 
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert B2B lead generation strategist. Incorporate user feedback while maintaining strategic coherence. Always respond with valid JSON."
+                },
+                {"role": "user", "content": prompt}
+            ]
             response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert B2B lead generation strategist. Incorporate user feedback while maintaining strategic coherence. Always respond with valid JSON."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7,
-                response_format={"type": "json_object"}
+                **self._build_call_kwargs(messages, temperature=0.7)
             )
 
             result = json.loads(response.choices[0].message.content)
@@ -357,17 +367,15 @@ For each country below, select the {cities_per_country} BEST cities to find busi
 Generate city selections now:"""
 
         try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": "You are an expert in global business geography. Select cities strategically based on target customer concentration, not just population. Always respond with valid JSON."
+                },
+                {"role": "user", "content": prompt}
+            ]
             response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert in global business geography. Select cities strategically based on target customer concentration, not just population. Always respond with valid JSON."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.5,  # Lower temperature for more consistent geographic selection
-                response_format={"type": "json_object"}
+                **self._build_call_kwargs(messages, temperature=0.5)
             )
 
             result = json.loads(response.choices[0].message.content)
