@@ -5,6 +5,7 @@ Free-form business context input for better AI understanding
 """
 
 import json
+import re
 from typing import List, Dict
 from openai import OpenAI
 
@@ -36,6 +37,23 @@ class AIQueryGeneratorV2:
             kwargs["temperature"] = temperature
             kwargs["response_format"] = {"type": "json_object"}
         return kwargs
+
+    def _parse_response(self, content: str) -> dict:
+        """Parse JSON from model response, handling markdown code blocks."""
+        # Try direct parse first
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+        # Strip markdown code block (```json ... ``` or ``` ... ```)
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL)
+        if match:
+            return json.loads(match.group(1))
+        # Last resort: find first { ... } block
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise ValueError(f"No valid JSON found in response: {content[:200]}")
 
     def generate_queries(self,
                         business_context: str,
@@ -210,11 +228,13 @@ Generate the complete strategy now:"""
                 **self._build_call_kwargs(messages, temperature=0.7)
             )
 
-            result = json.loads(response.choices[0].message.content)
+            result = self._parse_response(response.choices[0].message.content)
             return result
 
         except Exception as e:
+            import traceback
             print(f"AI Generation Error: {e}")
+            traceback.print_exc()
             return self._fallback_response(business_context, countries)
 
     def optimize_queries(self,
@@ -277,7 +297,7 @@ Generate the revised plan:"""
                 **self._build_call_kwargs(messages, temperature=0.7)
             )
 
-            result = json.loads(response.choices[0].message.content)
+            result = self._parse_response(response.choices[0].message.content)
             return result
 
         except Exception as e:
@@ -378,7 +398,7 @@ Generate city selections now:"""
                 **self._build_call_kwargs(messages, temperature=0.5)
             )
 
-            result = json.loads(response.choices[0].message.content)
+            result = self._parse_response(response.choices[0].message.content)
             return result
 
         except Exception as e:
