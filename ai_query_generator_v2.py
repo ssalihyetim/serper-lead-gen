@@ -13,8 +13,8 @@ from openai import OpenAI
 class AIQueryGeneratorV2:
     """Generate and optimize search queries using AI with free-form context"""
 
-    # Models that don't support response_format or temperature
-    REASONING_MODELS = {"o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4-mini"}
+    # Models that don't support temperature (only default=1) or response_format
+    REASONING_MODELS = {"o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini"}
 
     def __init__(self, api_key: str, model: str = "gpt-4.1-mini"):
         """
