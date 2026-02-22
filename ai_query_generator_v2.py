@@ -12,7 +12,7 @@ from openai import OpenAI
 class AIQueryGeneratorV2:
     """Generate and optimize search queries using AI with free-form context"""
 
-    def __init__(self, api_key: str, model: str = "gpt-5.2"):
+    def __init__(self, api_key: str, model: str = "gpt-4.1-mini"):
         """
         Initialize AI query generator
 

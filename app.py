@@ -297,13 +297,28 @@ def show_configuration_step(openai_key, serper_key):
         ai_model = st.selectbox(
             "Model for Query Generation",
             options=[
-                "gpt-4o-mini",
+                # GPT-4.1 family (latest, April 2025)
+                "gpt-4.1",
+                "gpt-4.1-mini",
+                "gpt-4.1-nano",
+                # GPT-4o family
                 "gpt-4o",
-                "gpt-4-turbo",
-                "o1-mini",
+                "gpt-4o-mini",
+                # o-series reasoning models
+                "o4-mini",
+                "o3",
+                "o3-mini",
             ],
             index=0,
-            help="gpt-4o-mini: Fast & cheap (~$0.01). gpt-4o: Smarter (~$0.10). gpt-4-turbo: Most capable (~$0.20). o1-mini: Best reasoning (~$0.15)."
+            help=(
+                "GPT-4.1: Best instruction-following, 1M context (~$0.08/1K) | "
+                "GPT-4.1 mini: Fast & balanced (~$0.02/1K) | "
+                "GPT-4.1 nano: Fastest & cheapest (~$0.005/1K) | "
+                "GPT-4o: Strong all-rounder (~$0.05/1K) | "
+                "GPT-4o-mini: Budget option (~$0.003/1K) | "
+                "o4-mini: Fast reasoning (~$0.04/1K) | "
+                "o3: Deep reasoning, best for complex queries (~$0.30/1K)"
+            )
         )
 
         # Show selected cities preview

@@ -609,25 +609,76 @@ Example: 10 cities, 13 queries, 1 page
 
 ---
 
-## Current System State (February 21, 2026)
+## Recent Updates (February 22, 2026)
+
+### Bug Fixes & Feature Additions
+
+**1. Memory Limit Fix (`app.py`)**
+- **Problem**: `all_results` list accumulated in RAM throughout entire search
+- **Risk**: 10 countries × 10 cities × 13 queries × 10 pages = ~130k rows → ~500MB+ → Streamlit Cloud crash (1GB limit)
+- **Fix**: After each city's results are flushed to Supabase, the list is cleared from RAM (`del results_list[:]`)
+- RAM usage now constant (~1 city buffer) regardless of campaign size
+
+**2. City Name in Queries (`app.py`)**
+- **Problem**: Queries only used `gl` (country code) parameter — Google returned national results, not city-specific
+- **Fix**: City name appended directly to query text: `"lanyard supplier"` → `"lanyard supplier New York"`
+- Applies to both Search API and Maps API phases
+
+**3. AI Model Selector (`app.py`)**
+- New dropdown in Step 1 with 8 model options:
+
+| Model | Type | Best For | Est. Cost |
+|-------|------|----------|-----------|
+| `gpt-4.1` | Standard | Best instruction-following, 1M context | ~$0.08/1K |
+| `gpt-4.1-mini` | Standard | Fast & balanced (default) | ~$0.02/1K |
+| `gpt-4.1-nano` | Standard | Fastest & cheapest | ~$0.005/1K |
+| `gpt-4o` | Standard | Strong all-rounder | ~$0.05/1K |
+| `gpt-4o-mini` | Standard | Budget option | ~$0.003/1K |
+| `o4-mini` | Reasoning | Fast reasoning | ~$0.04/1K |
+| `o3` | Reasoning | Deep reasoning, complex queries | ~$0.30/1K |
+| `o3-mini` | Reasoning | Lighter reasoning | ~$0.015/1K |
+
+- Default changed from `gpt-4o-mini` to `gpt-4.1-mini` (newer, better)
+- `ai_query_generator_v2.py` default model also updated to `gpt-4.1-mini`
+
+**4. Prompt Preview (`app.py`)**
+- Step 2 shows expandable "📄 View prompt being sent to AI" panel
+- Displays exact prompt with user's sector/profile/countries filled in
+- Allows review and back-navigation before AI generation
+- Config summary panel hides API keys from display
+
+**5. Supabase Fix (`requirements.txt`)**
+- Added `supabase>=2.0.0` to `requirements.txt` (was only in `requirements_ui.txt`)
+- Streamlit Cloud reads `requirements.txt` — this was causing "Cloud storage offline"
+
+**6. Cloud Storage Incremental Save (`app.py`)**
+- Results saved to Supabase after **each city** completes (not just at end)
+- On crash/timeout: partial results preserved with `status='interrupted'`
+- Results page downloads CSV directly from Supabase cloud
+
+---
+
+## Current System State (February 22, 2026)
 
 **Working Features:**
 - ✅ 174-country support with AI city selection
-- ✅ AI query generation with OpenAI GPT-4o-mini
+- ✅ AI query generation with 8 model options (gpt-4.1 family, gpt-4o, o3/o4-mini)
+- ✅ Prompt preview before AI generation
+- ✅ City name appended to all search queries
 - ✅ 87-site exclusion list (marketplaces, B2B directories, chambers)
 - ✅ Search API with pagination (1-10 pages per query)
 - ✅ Maps API integration with pagination (1-10 pages per query)
 - ✅ Three search modes (Both/Search Only/Maps Only)
-- ✅ Combined CSV export with all fields
-- ✅ Query/city selection UI with checkboxes
-- ✅ Saved plans feature (JSON persistence)
-- ✅ **NEW: Checkpoint system (auto-save every 50 results)**
+- ✅ Incremental Supabase save (per-city flush, RAM cleared after each city)
+- ✅ Checkpoint CSV fallback (local, every 50 results)
+- ✅ Past searches sidebar with cloud CSV download
+- ✅ Memory-safe execution (constant RAM regardless of campaign size)
 
 **Active Components:**
 - `app.py` - Streamlit UI (primary interface) - Port 8501
 - `serper_search_v2.py` - Search API with exclusions + checkpoints
 - `serper_maps.py` - Maps API for local businesses + checkpoints
-- `ai_query_generator_v2.py` - OpenAI query generation
+- `ai_query_generator_v2.py` - OpenAI query generation (default: gpt-4.1-mini)
 - `cloud_storage.py` - Supabase cloud storage (incremental save per city)
 - `config/exclusions.py` - 87-site filter list
 - `config/countries.py` - 174-country database
@@ -635,7 +686,7 @@ Example: 10 cities, 13 queries, 1 page
 
 **Deployed:**
 - GitHub: https://github.com/ssalihyetim/serper-lead-gen (private)
-- Streamlit Cloud: ✅ Live (secrets configured: OPENAI_API_KEY, SERPER_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY)
+- Streamlit Cloud: ✅ Live (secrets: OPENAI_API_KEY, SERPER_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY)
 - Supabase: ✅ Live (sceakbhicicehgcayvmx.supabase.co)
 
 **Deprecated/Removed:**
@@ -643,8 +694,7 @@ Example: 10 cities, 13 queries, 1 page
 - Hardcoded city lists in countries.py (now AI-selected)
 
 **Next Chat Context:**
-If starting a fresh chat, all core infrastructure is complete:
-1. ✅ Data loss prevention (checkpoint CSV + Supabase incremental)
-2. ✅ Supabase cloud storage (searches + results tables)
-3. ✅ Streamlit Cloud deployed with secrets
-4. 🔜 Future: Multi-user auth & SaaS launch (3-6 months)
+All core infrastructure is complete. Possible next steps:
+1. 🔜 Multi-user auth & SaaS launch (3-6 months)
+2. 🔜 Result quality scoring (completeness: has phone + website + rating)
+3. 🔜 Deduplication across searches (same domain in multiple campaigns)
