@@ -989,11 +989,11 @@ def show_execution_step(serper_key):
                 duration_seconds = time.time() - start_time
                 duration_minutes = duration_seconds / 60
 
-                # results_by_country: approximate from cloud (avoid re-fetching all rows)
-                results_by_country = {c: len(cities) for c, cities in
-                                      {ci['country']: [ci for ci in all_cities
-                                                        if ci['country'] == c]
-                                       for c in set(ci['country'] for ci in all_cities)}.items()}
+                # results_by_country: count cities per country
+                results_by_country = {}
+                for city_item in all_cities:
+                    country_code = city_item['country']
+                    results_by_country[country_code] = results_by_country.get(country_code, 0) + 1
 
                 output_file = None  # Results are in cloud, not local file
 
