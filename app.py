@@ -836,6 +836,7 @@ def show_execution_step(serper_key):
 
                 # Get search type
                 search_type = config.get('search_type', 'Both (Recommended)')
+                search_type_db = search_type.replace(' (Recommended)', '')
 
                 # Create cloud search session
                 cs = get_cloud_storage()
@@ -843,7 +844,7 @@ def show_execution_step(serper_key):
                     sector=config.get('sector', ''),
                     countries=config.get('countries', []),
                     queries=[q.get('query_template') for q in selected_queries],
-                    search_type=search_type,
+                    search_type=search_type_db,
                 )
 
                 # Initialize searchers
