@@ -105,6 +105,8 @@ CRITICAL RULES:
 - Use terminology and language patterns that TARGET CUSTOMERS use in their business
 - Include industry-specific terms, business types, and buying signals
 - Think: "How can I identify businesses matching this target customer profile?"
+- query_template must be CLEAN SEARCH TERMS ONLY — never include -site:, -jobs, -careers or any exclusion operators inside query_template
+- Site exclusions and negative keywords go ONLY in the custom_exclusions field, not in query_template
 
 Example:
 If context says: "We sell SaaS to custom lanyard manufacturers"
@@ -123,7 +125,18 @@ Recommend cities based on:
 - Business hubs and clusters for this industry
 - Budget optimization within max_total_queries
 
-**STEP 5: EXPLAIN YOUR STRATEGY**
+**STEP 5: IDENTIFY INDUSTRY-SPECIFIC EXCLUSIONS**
+Based on the industry and ICP, identify domains/site types that would appear in search results but are NOT targetable businesses. Think about:
+- Industry associations, trade bodies, certification bodies for this sector
+- Industry-specific news and publication sites
+- Government regulatory agencies for this industry
+- Industry directories that list but don't sell (aggregators)
+- Academic/research institutions in this field
+- Competitor types that are NOT the target customer
+
+For each exclusion, provide the domain (if specific) or a pattern description. Provide 5-15 targeted exclusions.
+
+**STEP 6: EXPLAIN YOUR STRATEGY**
 Provide a detailed, human-readable explanation of:
 - How you interpreted the business context
 - Why you chose these specific queries
@@ -196,6 +209,21 @@ Provide a detailed, human-readable explanation of:
             "phase_3": "LOW priority exploratory queries if budget permits (800 calls, ~5% of results)"
         }}
     }},
+
+    "custom_exclusions": [
+        {{
+            "domain": "pharma.org",
+            "reason": "Industry association - lists members but not a targetable business itself"
+        }},
+        {{
+            "domain": "drugstore.com",
+            "reason": "Retail chain - not matching B2B distributor ICP"
+        }},
+        {{
+            "domain": "fda.gov",
+            "reason": "Government regulatory agency for this industry"
+        }}
+    ],
 
     "strategy_explanation": {{
         "context_interpretation": "Detailed explanation of how you understood the business context and identified target customer",

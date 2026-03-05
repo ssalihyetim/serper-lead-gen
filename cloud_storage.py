@@ -269,11 +269,40 @@ class CloudStorage:
     def get_results_as_csv(self, search_id: str) -> Optional[str]:
         """
         Fetch results for a search and return as CSV string (for download).
+        Deduplicates by domain before export.
         Returns None if unavailable or no results.
         """
         results = self.get_results(search_id)
         if not results:
             return None
+
+        # Domains to filter out post-search (social media, news, forums, government)
+        BLOCKED_DOMAINS = {
+            "facebook.com", "instagram.com", "tiktok.com", "linkedin.com",
+            "twitter.com", "x.com", "youtube.com", "pinterest.com", "snapchat.com",
+            "reddit.com", "quora.com", "medium.com", "substack.com",
+            "wikipedia.org", "wikihow.com", "glassdoor.com", "indeed.com",
+            "tripadvisor.com", "trustpilot.com", "yelp.com",
+            "nytimes.com", "bbc.com", "bbc.co.uk", "reuters.com",
+            "forbes.com", "bloomberg.com", "cnbc.com", "theguardian.com",
+            "businessinsider.com", "techcrunch.com", "entrepreneur.com",
+        }
+        BLOCKED_SUFFIXES = (".gov", ".gov.uk", ".gov.au", ".gouv.fr", ".gob.es")
+
+        # Deduplicate by domain and filter blocked sites (keep first occurrence)
+        seen_domains = set()
+        unique_results = []
+        for row in results:
+            domain = (row.get("domain") or "").strip().lower()
+            if not domain:
+                continue
+            if domain in BLOCKED_DOMAINS:
+                continue
+            if any(domain.endswith(sfx) for sfx in BLOCKED_SUFFIXES):
+                continue
+            if domain not in seen_domains:
+                seen_domains.add(domain)
+                unique_results.append(row)
 
         output = io.StringIO()
         fieldnames = [
@@ -284,8 +313,24 @@ class CloudStorage:
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(results)
+        writer.writerows(unique_results)
         return output.getvalue()
+
+    def get_completed_cities(self, search_id: str) -> set:
+        """Return set of 'City, COUNTRY' strings already saved for this search."""
+        if not self.available or not search_id:
+            return set()
+        try:
+            response = (
+                self.client.table("results")
+                .select("city")
+                .eq("search_id", search_id)
+                .execute()
+            )
+            return {r["city"] for r in response.data if r.get("city")}
+        except Exception as e:
+            print(f"[CloudStorage] get_completed_cities failed: {e}")
+            return set()
 
     def get_search_stats(self) -> dict:
         """Return aggregate stats: total searches, total results, etc."""

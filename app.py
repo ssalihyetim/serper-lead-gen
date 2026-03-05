@@ -146,12 +146,34 @@ def main():
             if past_searches:
                 for s in past_searches:
                     started = s.get('started_at', '')[:10] if s.get('started_at') else ''
-                    label = f"{started} | {s.get('sector','?')} | {s.get('total_results',0):,} results"
+                    status = s.get('status', '?')
+                    status_icon = "✅" if status == "completed" else "⚠️" if status == "interrupted" else "🔄"
+                    label = f"{status_icon} {started} | {s.get('sector','?')[:30]} | {s.get('total_results',0):,} results"
                     with st.expander(label):
-                        st.caption(f"Status: {s.get('status','?')} | Search type: {s.get('search_type','?')}")
+                        st.caption(f"Status: {status} | Search type: {s.get('search_type','?')}")
                         countries_list = s.get('countries', [])
                         if countries_list:
                             st.caption(f"Countries: {', '.join(countries_list)}")
+
+                        # Resume button for interrupted searches
+                        if status == "interrupted":
+                            notes_raw = s.get('notes')
+                            if notes_raw:
+                                try:
+                                    resume_data = json.loads(notes_raw)
+                                    if st.button(f"▶️ Resume Search", key=f"resume_{s['id']}"):
+                                        st.session_state.config = resume_data['config']
+                                        st.session_state.ai_plan = resume_data['ai_plan']
+                                        st.session_state.selected_cities = resume_data.get('selected_cities', {})
+                                        st.session_state.selected_exclusions = resume_data.get('selected_exclusions', {})
+                                        st.session_state.resume_search_id = s['id']
+                                        st.session_state.step = 4
+                                        st.rerun()
+                                except Exception:
+                                    st.caption("Resume data not available for this search.")
+                            else:
+                                st.caption("Resume not available (search started before this feature).")
+
                         if st.button(f"⬇️ Download CSV", key=f"dl_{s['id']}"):
                             csv_data = cs.get_results_as_csv(s['id'])
                             if csv_data:
@@ -537,6 +559,42 @@ def show_review_step():
 
     st.divider()
 
+    # AI-suggested custom exclusions with checkboxes
+    custom_exclusions = ai_plan.get('custom_exclusions', [])
+    if custom_exclusions:
+        st.subheader("🚫 AI-Suggested Industry Exclusions")
+        st.caption("Select which sites to exclude from Google search queries. Checked = will be added as -site: operator.")
+
+        if 'selected_exclusions' not in st.session_state:
+            st.session_state.selected_exclusions = {
+                e['domain']: True for e in custom_exclusions if e.get('domain')
+            }
+
+        for excl in custom_exclusions:
+            domain = excl.get('domain', '')
+            reason = excl.get('reason', '')
+            if not domain:
+                continue
+            checked = st.checkbox(
+                f"`-site:{domain}` — {reason}",
+                value=st.session_state.selected_exclusions.get(domain, True),
+                key=f"excl_{domain}"
+            )
+            st.session_state.selected_exclusions[domain] = checked
+
+        # Also allow adding custom domains manually
+        st.caption("Add your own exclusion:")
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            new_domain = st.text_input("Domain to exclude (e.g. example.com)", key="new_excl_domain", label_visibility="collapsed")
+        with col2:
+            if st.button("Add", key="add_excl_btn") and new_domain.strip():
+                domain_clean = new_domain.strip().lower().removeprefix("www.").removeprefix("http://").removeprefix("https://").split("/")[0]
+                st.session_state.selected_exclusions[domain_clean] = True
+                st.rerun()
+
+        st.divider()
+
     # Query variations
     st.subheader("🔍 Generated Query Variations")
 
@@ -838,14 +896,28 @@ def show_execution_step(serper_key):
                 search_type = config.get('search_type', 'Both (Recommended)')
                 search_type_db = search_type.replace(' (Recommended)', '')
 
-                # Create cloud search session
+                # Create cloud search session (store full config for resume)
                 cs = get_cloud_storage()
-                cloud_search_id = cs.create_search(
-                    sector=config.get('sector', ''),
-                    countries=config.get('countries', []),
-                    queries=[q.get('query_template') for q in selected_queries],
-                    search_type=search_type_db,
-                )
+                resume_search_id = st.session_state.pop('resume_search_id', None)
+                if resume_search_id:
+                    cloud_search_id = resume_search_id
+                    cs.client.table("searches").update({"status": "running"}).eq("id", cloud_search_id).execute()
+                else:
+                    resume_notes = json.dumps({
+                        'config': config,
+                        'ai_plan': st.session_state.get('ai_plan', {}),
+                        'selected_queries': selected_queries,
+                        'selected_cities': selected_cities_dict,
+                        'selected_exclusions': st.session_state.get('selected_exclusions', {}),
+                        'pages_per_query': pages_per_query,
+                    })
+                    cloud_search_id = cs.create_search(
+                        sector=config.get('sector', ''),
+                        countries=config.get('countries', []),
+                        queries=[q.get('query_template') for q in selected_queries],
+                        search_type=search_type_db,
+                        notes=resume_notes,
+                    )
 
                 # Initialize searchers
                 searcher = None
@@ -893,6 +965,20 @@ def show_execution_step(serper_key):
                     # Always clear from RAM regardless of cloud availability
                     del results_list[:]
 
+                # Get already-completed cities (for resume)
+                completed_cities = cs.get_completed_cities(cloud_search_id)
+
+                # Build exclusion string once (global + user-selected AI suggestions)
+                from config.exclusions import get_exclusion_string
+                global_exclusions = get_exclusion_string(include_b2b_directories=True)
+                # Automatic word exclusions to filter out job listings, news, academic pages
+                word_exclusions = "-jobs -careers -hiring -vacancy -obituary -thesis -dissertation"
+                selected_exclusions = st.session_state.get('selected_exclusions', {})
+                ai_exclusions = " ".join(
+                    f"-site:{domain}" for domain, checked in selected_exclusions.items() if checked
+                )
+                full_exclusion_str = " ".join(filter(None, [global_exclusions, ai_exclusions, word_exclusions]))
+
                 # Phase 1: Execute Search API (if enabled)
                 if searcher:
                     status_text.text("Phase 1: Search API...")
@@ -900,6 +986,13 @@ def show_execution_step(serper_key):
                     for city_info in all_cities:
                         city_name = city_info['city']
                         country = city_info['country']
+                        city_key = f"{city_name}, {country}"
+
+                        if city_key in completed_cities:
+                            status_text.text(f"Skipping (already done): {city_key}")
+                            completed += len(selected_queries) * pages_per_query
+                            progress_bar.progress(min(completed / total_tasks, 1.0))
+                            continue
 
                         status_text.text(f"Search API: {city_name}, {country}...")
 
@@ -907,8 +1000,8 @@ def show_execution_step(serper_key):
                             query_template = query.get('query_template', '')
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
-                            # Append city name so Google returns city-specific results
-                            query_with_city = f"{query_text} {city_name}"
+                            # Clean query + city, exclusions appended separately
+                            query_with_city = f"{query_text} {city_name} {full_exclusion_str}"
 
                             for page_num in range(1, pages_per_query + 1):
                                 searcher.search_single_query(
@@ -1081,6 +1174,8 @@ def show_results_step():
     st.subheader("📥 Download Results")
     cloud_search_id = results.get('cloud_search_id')
 
+    sector_slug = st.session_state.get('config', {}).get('sector', 'results')
+
     if cloud_search_id:
         st.info(f"☁️ All results saved to cloud (ID: `{cloud_search_id[:8]}...`)")
         cs = get_cloud_storage()
@@ -1091,7 +1186,7 @@ def show_results_step():
                 st.download_button(
                     label="📥 Download Full Results CSV",
                     data=csv_data,
-                    file_name=f"leads_{config.get('sector','results')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    file_name=f"leads_{sector_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv"
                 )
             else:
@@ -1100,6 +1195,25 @@ def show_results_step():
             st.warning("Cloud storage offline - results may not be available.")
     else:
         st.warning("No cloud search ID found. Results may not have been saved.")
+
+    # Fallback: download from local checkpoint files
+    import glob
+    checkpoint_files = sorted(glob.glob("results/checkpoint_search_*.csv"), reverse=True)
+    if checkpoint_files:
+        st.divider()
+        st.subheader("📁 Local Checkpoint Files")
+        st.info("Results were also saved locally as checkpoint files.")
+        for filepath in checkpoint_files[:5]:
+            filename = os.path.basename(filepath)
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            st.download_button(
+                label=f"📥 Download {filename}",
+                data=file_data,
+                file_name=filename,
+                mime="text/csv",
+                key=f"dl_{filename}"
+            )
 
     if st.button("🔄 Start New Search"):
         for key in list(st.session_state.keys()):

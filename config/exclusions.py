@@ -127,6 +127,37 @@ NEWS_MEDIA = [
     "forbes.com",
     "bloomberg.com",
     "cnbc.com",
+    "reuters.com",
+    "bbc.com",
+    "bbc.co.uk",
+    "theguardian.com",
+    "huffpost.com",
+    "businessinsider.com",
+    "techcrunch.com",
+    "entrepreneur.com",
+    "inc.com",
+    "medium.com",
+    "substack.com",
+]
+
+# Government & institutional sites
+GOVERNMENT_SITES = [
+    "europa.eu",
+    "ec.europa.eu",
+    "un.org",
+    "who.int",
+    "worldbank.org",
+    "imf.org",
+]
+
+# Forums & community platforms
+FORUMS = [
+    "stackexchange.com",
+    "stackoverflow.com",
+    "tripadvisor.com",
+    "glassdoor.com",
+    "indeed.com",
+    "quora.com",
 ]
 
 def get_exclusion_string(include_b2b_directories=False):
@@ -145,7 +176,9 @@ def get_exclusion_string(include_b2b_directories=False):
         INFORMATION_SITES +
         REVIEW_SITES +
         SEARCH_ENGINES +
-        NEWS_MEDIA
+        NEWS_MEDIA +
+        GOVERNMENT_SITES +
+        FORUMS
     )
 
     if include_b2b_directories:
@@ -169,7 +202,9 @@ def get_exclusion_list(include_b2b_directories=False):
         INFORMATION_SITES +
         REVIEW_SITES +
         SEARCH_ENGINES +
-        NEWS_MEDIA
+        NEWS_MEDIA +
+        GOVERNMENT_SITES +
+        FORUMS
     )
 
     if include_b2b_directories:
