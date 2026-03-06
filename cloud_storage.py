@@ -210,17 +210,23 @@ class CloudStorage:
             row = {k: v for k, v in row.items() if v is not None}
             rows.append(row)
 
-        # Insert in chunks of 500 to avoid payload limits
+        # Insert in chunks of 100 to reduce payload size and surface errors faster
         inserted = 0
-        chunk_size = 500
+        last_error = None
+        chunk_size = 100
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
             try:
                 response = self.client.table("results").insert(chunk).execute()
                 inserted += len(response.data)
             except Exception as e:
-                print(f"[CloudStorage] save_results chunk {i} failed: {type(e).__name__}: {e}")
-                import traceback; traceback.print_exc()
+                import traceback
+                last_error = f"{type(e).__name__}: {e}"
+                print(f"[CloudStorage] save_results chunk {i} failed: {last_error}")
+                traceback.print_exc()
+
+        if last_error:
+            self._last_save_error = last_error
 
         print(f"[CloudStorage] Saved {inserted}/{len(results)} results for {search_id}")
         return inserted
