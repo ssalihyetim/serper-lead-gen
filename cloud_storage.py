@@ -219,7 +219,8 @@ class CloudStorage:
                 response = self.client.table("results").insert(chunk).execute()
                 inserted += len(response.data)
             except Exception as e:
-                print(f"[CloudStorage] save_results chunk {i} failed: {e}")
+                print(f"[CloudStorage] save_results chunk {i} failed: {type(e).__name__}: {e}")
+                import traceback; traceback.print_exc()
 
         print(f"[CloudStorage] Saved {inserted}/{len(results)} results for {search_id}")
         return inserted

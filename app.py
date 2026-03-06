@@ -959,8 +959,11 @@ def show_execution_step(serper_key):
                     if not results_list:
                         return
                     if cloud_search_id and cs.available:
-                        cs.save_results(cloud_search_id, results_list)
-                        total_saved_count += len(results_list)
+                        inserted = cs.save_results(cloud_search_id, results_list)
+                        if inserted == 0 and len(results_list) > 0:
+                            # Surface the error — don't silently lose data
+                            st.warning(f"⚠️ Cloud save failed for a batch of {len(results_list)} results. Check Supabase logs.")
+                        total_saved_count += inserted
                         cs.update_search_count(cloud_search_id, total_saved_count)
                     # Always clear from RAM regardless of cloud availability
                     del results_list[:]
