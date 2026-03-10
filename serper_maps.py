@@ -100,8 +100,8 @@ class SerperMapsSearcher:
             address = place.get('address', '')
             phone = place.get('phoneNumber', '')
             website = place.get('website', '')
-            rating = place.get('rating', '')
-            reviews = place.get('reviews', 0)
+            rating = place.get('rating') or None
+            reviews = place.get('reviews') or None
             category = place.get('category', '')
             place_id = place.get('placeId', '')
 
