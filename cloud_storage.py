@@ -206,9 +206,20 @@ class CloudStorage:
                 "source": r.get("source", "search"),
                 "position": r.get("position"),
             }
-            # Remove None values to let DB use defaults
-            row = {k: v for k, v in row.items() if v is not None}
-            rows.append(row)
+            # Remove None and empty-string values; convert numeric fields properly
+            NUMERIC_FIELDS = {"rating", "review_count", "position"}
+            cleaned = {}
+            for k, v in row.items():
+                if v is None or v == "":
+                    continue
+                if k in NUMERIC_FIELDS:
+                    try:
+                        cleaned[k] = float(v) if k == "rating" else int(v)
+                    except (ValueError, TypeError):
+                        continue
+                else:
+                    cleaned[k] = v
+            rows.append(cleaned)
 
         # Insert in chunks of 100 to reduce payload size and surface errors faster
         inserted = 0

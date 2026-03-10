@@ -971,16 +971,19 @@ def show_execution_step(serper_key):
                 # Get already-completed cities (for resume)
                 completed_cities = cs.get_completed_cities(cloud_search_id)
 
-                # Build exclusion string once (global + user-selected AI suggestions)
-                from config.exclusions import get_exclusion_string
-                global_exclusions = get_exclusion_string(include_b2b_directories=True)
-                # Automatic word exclusions to filter out job listings, news, academic pages
-                word_exclusions = "-jobs -careers -hiring -vacancy -obituary -thesis -dissertation"
+                # Build a concise exclusion string (Serper has ~2000 char query limit)
+                # Only include the most impactful exclusions; rest are filtered post-download
+                CORE_EXCLUSIONS = [
+                    "amazon.com", "ebay.com", "alibaba.com", "aliexpress.com", "etsy.com",
+                    "facebook.com", "instagram.com", "tiktok.com", "linkedin.com", "youtube.com",
+                    "reddit.com", "wikipedia.org", "indeed.com", "glassdoor.com",
+                ]
                 selected_exclusions = st.session_state.get('selected_exclusions', {})
-                ai_exclusions = " ".join(
-                    f"-site:{domain}" for domain, checked in selected_exclusions.items() if checked
-                )
-                full_exclusion_str = " ".join(filter(None, [global_exclusions, ai_exclusions, word_exclusions]))
+                ai_selected = [d for d, checked in selected_exclusions.items() if checked]
+                all_exclusion_domains = CORE_EXCLUSIONS + ai_selected
+                word_exclusions = "-jobs -careers"
+                site_exclusions = " ".join(f"-site:{d}" for d in all_exclusion_domains)
+                full_exclusion_str = f"{site_exclusions} {word_exclusions}"
 
                 # Phase 1: Execute Search API (if enabled)
                 if searcher:
