@@ -1032,19 +1032,28 @@ def show_execution_step(serper_key):
                     for city_info in all_cities:
                         city_name = city_info['city']
                         country = city_info['country']
+                        city_key = f"{city_name}, {country}"
+
+                        # Skip already-completed cities (resume support)
+                        if city_key in completed_cities:
+                            status_text.text(f"Maps: Skipping (already done): {city_key}")
+                            completed += len(selected_queries) * pages_per_query
+                            progress_bar.progress(min(completed / total_tasks, 1.0))
+                            continue
 
                         status_text.text(f"Maps API: {city_name}, {country}...")
+                        city_maps_count = 0
 
                         for query in selected_queries:
                             query_template = query.get('query_template', '')
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
-                            # Append city name so Maps returns city-specific results
-                            query_with_city = f"{query_text} {city_name}"
+                            # Do NOT append city name here — serper_maps.py already
+                            # builds "query in location" from the location parameter.
 
                             for page_num in range(1, pages_per_query + 1):
                                 response = maps_searcher.search_maps(
-                                    query=query_with_city,
+                                    query=query_text,
                                     location=f"{city_name}, {country}",
                                     gl=country.lower(),
                                     hl='en',
@@ -1057,10 +1066,11 @@ def show_execution_step(serper_key):
                                             places, query_text, f"{city_name}, {country}"
                                         )
                                         maps_searcher.all_results.extend(batch)
+                                        city_maps_count += len(batch)
 
                                 completed += 1
-                                progress_bar.progress(completed / total_tasks)
-                                status_text.text(f"Maps API: {city_name}, {country}... ({completed}/{total_tasks})")
+                                progress_bar.progress(min(completed / total_tasks, 1.0))
+                                status_text.text(f"Maps API: {city_name}, {country}... ({completed}/{total_tasks}) — {city_maps_count} businesses found")
 
                         # Flush city results to cloud + clear from RAM
                         flush_and_clear(maps_searcher.all_results)
