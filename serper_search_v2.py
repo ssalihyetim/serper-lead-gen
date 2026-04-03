@@ -8,6 +8,7 @@ import requests
 import csv
 import sys
 import os
+import time
 from typing import List, Dict, Set, Optional
 from datetime import datetime
 from urllib.parse import urlparse
@@ -44,6 +45,67 @@ class EnhancedSerperSearcher:
         self.checkpoint_interval = 50  # Save every 50 results
         self.last_checkpoint_count = 0
 
+    def _request_with_retry(self, url: str, payload: dict, max_retries: int = 3) -> Dict:
+        """
+        Make an HTTP POST request with exponential backoff retry.
+
+        Args:
+            url: API endpoint URL
+            payload: JSON payload
+            max_retries: Maximum number of retry attempts (default: 3)
+
+        Returns:
+            API response as dictionary, or {} on total failure
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = requests.post(
+                    url,
+                    headers=self.headers,
+                    json=payload,
+                    timeout=30
+                )
+                # Rate limit (429) — always retry with longer backoff
+                if response.status_code == 429:
+                    wait = min(2 ** attempt * 2, 30)
+                    print(f"    ⏳ Rate limited (429). Waiting {wait}s... (attempt {attempt}/{max_retries})")
+                    time.sleep(wait)
+                    continue
+
+                response.raise_for_status()
+                self.api_call_count += 1
+                return response.json()
+
+            except requests.exceptions.ConnectionError as e:
+                wait = 2 ** attempt
+                print(f"    ⚠️  Connection error (attempt {attempt}/{max_retries}): {e}")
+                if attempt < max_retries:
+                    print(f"    ⏳ Retrying in {wait}s...")
+                    time.sleep(wait)
+            except requests.exceptions.Timeout:
+                wait = 2 ** attempt
+                print(f"    ⚠️  Timeout (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    print(f"    ⏳ Retrying in {wait}s...")
+                    time.sleep(wait)
+            except requests.exceptions.HTTPError as e:
+                # 5xx server errors — retry; 4xx client errors (except 429) — don't
+                if response.status_code >= 500:
+                    wait = 2 ** attempt
+                    print(f"    ⚠️  Server error {response.status_code} (attempt {attempt}/{max_retries})")
+                    if attempt < max_retries:
+                        print(f"    ⏳ Retrying in {wait}s...")
+                        time.sleep(wait)
+                else:
+                    print(f"    ⚠️  HTTP error {response.status_code}: {e}")
+                    return {}
+            except requests.exceptions.RequestException as e:
+                print(f"    ⚠️  Request error: {e}")
+                return {}
+
+        print(f"    ❌ All {max_retries} attempts failed for this request")
+        return {}
+
     def search(self, query: str, gl: str = "us", hl: str = "en", num: int = 10, page: int = 1) -> Dict:
         """
         Perform a search query using Serper API.
@@ -66,27 +128,15 @@ class EnhancedSerperSearcher:
             "page": page
         }
 
-        try:
-            response = requests.post(
-                self.base_url,
-                headers=self.headers,
-                json=payload,
-                timeout=30
-            )
-            response.raise_for_status()
-            self.api_call_count += 1
-            data = response.json()
+        data = self._request_with_retry(self.base_url, payload)
 
-            # Capture related searches if available
-            if 'relatedSearches' in data and data['relatedSearches']:
-                self.related_searches[query] = [
-                    item.get('query', '') for item in data['relatedSearches']
-                ]
+        # Capture related searches if available
+        if data and 'relatedSearches' in data and data['relatedSearches']:
+            self.related_searches[query] = [
+                item.get('query', '') for item in data['relatedSearches']
+            ]
 
-            return data
-        except requests.exceptions.RequestException as e:
-            print(f"    ⚠️  Error: {e}")
-            return {}
+        return data
 
     def get_autocomplete_suggestions(self, partial_query: str, gl: str = "us") -> List[str]:
         """
@@ -104,27 +154,17 @@ class EnhancedSerperSearcher:
             "gl": gl
         }
 
-        try:
-            response = requests.post(
-                self.autocomplete_url,
-                headers=self.headers,
-                json=payload,
-                timeout=30
-            )
-            response.raise_for_status()
-            self.api_call_count += 1
-            data = response.json()
+        data = self._request_with_retry(self.autocomplete_url, payload)
 
-            # Extract suggestions - they come as list of dicts with 'value' key
-            suggestions = data.get('suggestions', [])
-            if isinstance(suggestions, list):
-                # Extract 'value' from each dict
-                return [s.get('value', s) if isinstance(s, dict) else s for s in suggestions]
+        if not data:
             return []
 
-        except requests.exceptions.RequestException as e:
-            print(f"    ⚠️  Autocomplete Error: {e}")
-            return []
+        # Extract suggestions - they come as list of dicts with 'value' key
+        suggestions = data.get('suggestions', [])
+        if isinstance(suggestions, list):
+            # Extract 'value' from each dict
+            return [s.get('value', s) if isinstance(s, dict) else s for s in suggestions]
+        return []
 
     def extract_domain(self, url: str) -> str:
         """Extract domain from URL"""

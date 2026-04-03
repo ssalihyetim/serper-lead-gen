@@ -492,9 +492,9 @@ Example: 10 cities, 13 queries, 1 page
 - [ ] Verify exclusions working (no TOBB, alibaba, turkishexporters in results)
 
 ### Priority 2: Performance Optimization
+- [x] Implement retry logic for failed API calls (Search + Maps + Supabase)
+- [x] Add timeout handling with exponential backoff
 - [ ] Add rate limiting for large Maps API campaigns (currently sequential)
-- [ ] Implement retry logic for failed Maps API calls
-- [ ] Add timeout handling for slow responses
 
 ### Priority 3: UX Improvements
 - [ ] Show separate progress for Search vs Maps phases
@@ -698,3 +698,51 @@ All core infrastructure is complete. Possible next steps:
 1. 🔜 Multi-user auth & SaaS launch (3-6 months)
 2. 🔜 Result quality scoring (completeness: has phone + website + rating)
 3. 🔜 Deduplication across searches (same domain in multiple campaigns)
+
+---
+
+## Recent Updates (April 3, 2026)
+
+### Major Fix: Search Interruption Prevention & Resume Improvements
+
+**Problem**: Searches were getting interrupted mid-way (e.g., Spain search cut off). Multiple root causes identified and fixed.
+
+#### Changes Made:
+
+**1. Retry Logic with Exponential Backoff (serper_search_v2.py, serper_maps.py)**
+- New `_request_with_retry()` method on both `EnhancedSerperSearcher` and `SerperMapsSearcher`
+- 3 retry attempts with exponential backoff (2s, 4s, 8s)
+- Handles: timeouts, connection errors, 429 rate limits, 5xx server errors
+- 4xx client errors (except 429) fail immediately (no retry)
+- Previously: single failed request silently skipped results with no retry
+
+**2. Data Loss Prevention in flush_and_clear (app.py)**
+- **Before**: Results deleted from RAM even when Supabase save failed → permanent data loss
+- **After**: If save fails, retries once after 2s pause. If retry also fails, results stay in RAM (not cleared)
+- Next city's flush will include the unsaved results from previous city
+
+**3. Phase-Aware Resume (cloud_storage.py, app.py)**
+- `get_completed_cities()` now accepts optional `source` parameter ('search' or 'maps')
+- Resume correctly distinguishes between Search API and Maps API phases
+- **Before**: If Search API completed for Madrid but Maps didn't, resume would skip Madrid entirely for both phases
+- **After**: Resume skips Madrid for Search API but still runs Maps API for Madrid
+
+**4. Supabase Save Retry (cloud_storage.py)**
+- `save_results()` chunk insertions now retry 3 times with exponential backoff
+- Previously: single failed chunk permanently lost that batch of results
+
+#### Root Causes of Search Interruptions:
+
+| Cause | Impact | Fix |
+|-------|--------|-----|
+| API timeout (30s) with no retry | Silent data loss per query | Retry 3x with backoff |
+| Rate limit (429) with no retry | Entire query skipped | Retry with longer backoff |
+| Supabase save failure + RAM clear | City results permanently lost | Retry save; keep in RAM on failure |
+| Resume not phase-aware | Skipped cities for Maps that only had Search done | Separate completed sets per phase |
+| Connection errors (sleep/wifi) | Search halts | Retry with backoff |
+
+#### Files Modified:
+- `serper_search_v2.py` - Added `_request_with_retry()`, refactored `search()` and `get_autocomplete_suggestions()`
+- `serper_maps.py` - Added `_request_with_retry()`, refactored `search_maps()`
+- `cloud_storage.py` - Added retry to `save_results()`, added `source` param to `get_completed_cities()`
+- `app.py` - Fixed `flush_and_clear()`, split `completed_cities` into `completed_search_cities` / `completed_maps_cities`

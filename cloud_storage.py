@@ -25,6 +25,7 @@ Usage:
 
 import os
 import sys
+import time
 from datetime import datetime
 from typing import Optional
 import csv
@@ -221,20 +222,27 @@ class CloudStorage:
                     cleaned[k] = v
             rows.append(cleaned)
 
-        # Insert in chunks of 100 to reduce payload size and surface errors faster
+        # Insert in chunks of 100 with retry logic
         inserted = 0
         last_error = None
         chunk_size = 100
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i : i + chunk_size]
-            try:
-                response = self.client.table("results").insert(chunk).execute()
-                inserted += len(response.data)
-            except Exception as e:
-                import traceback
-                last_error = f"{type(e).__name__}: {e}"
-                print(f"[CloudStorage] save_results chunk {i} failed: {last_error}")
-                traceback.print_exc()
+            for attempt in range(1, 4):  # 3 retries per chunk
+                try:
+                    response = self.client.table("results").insert(chunk).execute()
+                    inserted += len(response.data)
+                    break  # success
+                except Exception as e:
+                    last_error = f"{type(e).__name__}: {e}"
+                    print(f"[CloudStorage] save_results chunk {i} failed (attempt {attempt}/3): {last_error}")
+                    if attempt < 3:
+                        wait = 2 ** attempt
+                        print(f"[CloudStorage] Retrying in {wait}s...")
+                        time.sleep(wait)
+                    else:
+                        import traceback
+                        traceback.print_exc()
 
         if last_error:
             self._last_save_error = last_error
@@ -334,17 +342,23 @@ class CloudStorage:
         writer.writerows(unique_results)
         return output.getvalue()
 
-    def get_completed_cities(self, search_id: str) -> set:
-        """Return set of 'City, COUNTRY' strings already saved for this search."""
+    def get_completed_cities(self, search_id: str, source: str = None) -> set:
+        """
+        Return set of 'City, COUNTRY' strings already saved for this search.
+
+        Args:
+            search_id: The search session UUID
+            source: If provided, only return cities that have results with this source
+                    ('search' for Search API, 'maps' for Maps API).
+                    If None, returns all cities regardless of source.
+        """
         if not self.available or not search_id:
             return set()
         try:
-            response = (
-                self.client.table("results")
-                .select("city")
-                .eq("search_id", search_id)
-                .execute()
-            )
+            query = self.client.table("results").select("city, source").eq("search_id", search_id)
+            if source:
+                query = query.eq("source", source)
+            response = query.execute()
             return {r["city"] for r in response.data if r.get("city")}
         except Exception as e:
             print(f"[CloudStorage] get_completed_cities failed: {e}")

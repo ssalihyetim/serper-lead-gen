@@ -962,14 +962,22 @@ def show_execution_step(serper_key):
                         inserted = cs.save_results(cloud_search_id, results_list)
                         if inserted == 0 and len(results_list) > 0:
                             err = getattr(cs, '_last_save_error', 'unknown error')
-                            st.error(f"❌ Cloud save failed ({len(results_list)} results lost): {err}")
+                            st.warning(f"⚠️ Cloud save failed for {len(results_list)} results: {err}. Retrying...")
+                            # Retry once after a brief pause
+                            import time as _t
+                            _t.sleep(2)
+                            inserted = cs.save_results(cloud_search_id, results_list)
+                            if inserted == 0:
+                                st.error(f"❌ Retry failed. Keeping results in RAM (not clearing).")
+                                return  # Do NOT clear — keep in RAM so next flush can retry
                         total_saved_count += inserted
                         cs.update_search_count(cloud_search_id, total_saved_count)
-                    # Always clear from RAM regardless of cloud availability
+                    # Only clear from RAM after successful save (or if cloud is unavailable)
                     del results_list[:]
 
-                # Get already-completed cities (for resume)
-                completed_cities = cs.get_completed_cities(cloud_search_id)
+                # Get already-completed cities per phase (for resume)
+                completed_search_cities = cs.get_completed_cities(cloud_search_id, source='search') if searcher else set()
+                completed_maps_cities = cs.get_completed_cities(cloud_search_id, source='maps') if maps_searcher else set()
 
                 # Build a concise exclusion string (Serper has ~2000 char query limit)
                 # Only include the most impactful exclusions; rest are filtered post-download
@@ -994,8 +1002,8 @@ def show_execution_step(serper_key):
                         country = city_info['country']
                         city_key = f"{city_name}, {country}"
 
-                        if city_key in completed_cities:
-                            status_text.text(f"Skipping (already done): {city_key}")
+                        if city_key in completed_search_cities:
+                            status_text.text(f"Search: Skipping (already done): {city_key}")
                             completed += len(selected_queries) * pages_per_query
                             progress_bar.progress(min(completed / total_tasks, 1.0))
                             continue
@@ -1035,7 +1043,7 @@ def show_execution_step(serper_key):
                         city_key = f"{city_name}, {country}"
 
                         # Skip already-completed cities (resume support)
-                        if city_key in completed_cities:
+                        if city_key in completed_maps_cities:
                             status_text.text(f"Maps: Skipping (already done): {city_key}")
                             completed += len(selected_queries) * pages_per_query
                             progress_bar.progress(min(completed / total_tasks, 1.0))
