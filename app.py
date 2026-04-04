@@ -203,6 +203,35 @@ def main():
                                 )
                             else:
                                 st.warning("No results in cloud for this search.")
+                # Merge & Download: group by sector+countries
+                st.divider()
+                st.subheader("📦 Merge & Download")
+                # Group searches by sector+countries key
+                from collections import defaultdict
+                groups = defaultdict(list)
+                for s in past_searches:
+                    if s.get('total_results', 0) > 0:
+                        key = f"{s.get('sector','?')[:40]} | {', '.join(sorted(s.get('countries',[])))}"
+                        groups[key].append(s)
+
+                for group_key, group_searches in groups.items():
+                    if len(group_searches) > 1:
+                        total = sum(s.get('total_results', 0) for s in group_searches)
+                        if st.button(f"📦 Merge: {group_key} ({len(group_searches)} searches, {total:,} results)", key=f"merge_{group_key}"):
+                            search_ids = [s['id'] for s in group_searches]
+                            csv_data = cs.get_merged_results_as_csv(search_ids)
+                            if csv_data:
+                                lines = csv_data.strip().split('\n')
+                                st.success(f"Merged {len(group_searches)} searches → {len(lines)-1} unique domains")
+                                st.download_button(
+                                    label="📥 Download Merged CSV",
+                                    data=csv_data,
+                                    file_name=f"merged_{group_key[:20].replace(' ','_')}.csv",
+                                    mime="text/csv",
+                                    key=f"dl_merge_{group_key}"
+                                )
+                            else:
+                                st.warning("No results to merge.")
             else:
                 st.caption("No cloud searches yet")
 

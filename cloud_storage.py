@@ -276,21 +276,86 @@ class CloudStorage:
     def get_results(self, search_id: str, limit: int = 50000) -> list:
         """
         Fetch all results for a given search session.
+        Paginates automatically since Supabase REST API returns max 1000 rows per request.
         """
         if not self.available or not search_id:
             return []
         try:
-            response = (
-                self.client.table("results")
-                .select("*")
-                .eq("search_id", search_id)
-                .limit(limit)
-                .execute()
-            )
-            return response.data
+            all_data = []
+            page_size = 1000
+            offset = 0
+            while offset < limit:
+                fetch_size = min(page_size, limit - offset)
+                response = (
+                    self.client.table("results")
+                    .select("*")
+                    .eq("search_id", search_id)
+                    .range(offset, offset + fetch_size - 1)
+                    .execute()
+                )
+                batch = response.data
+                all_data.extend(batch)
+                if len(batch) < fetch_size:
+                    break  # No more rows
+                offset += fetch_size
+            print(f"[CloudStorage] Fetched {len(all_data)} results for {search_id[:8]}")
+            return all_data
         except Exception as e:
             print(f"[CloudStorage] get_results failed: {e}")
             return []
+
+    def get_merged_results_as_csv(self, search_ids: list) -> str:
+        """
+        Fetch results from multiple search sessions and merge into a single
+        deduplicated CSV. Useful when the same campaign was split across
+        multiple runs (interrupted + resumed as new search).
+        """
+        all_results = []
+        for sid in search_ids:
+            all_results.extend(self.get_results(sid))
+
+        if not all_results:
+            return None
+
+        # Reuse the same dedup/filter logic from get_results_as_csv
+        BLOCKED_DOMAINS = {
+            "facebook.com", "instagram.com", "tiktok.com", "linkedin.com",
+            "twitter.com", "x.com", "youtube.com", "pinterest.com", "snapchat.com",
+            "reddit.com", "quora.com", "medium.com", "substack.com",
+            "wikipedia.org", "wikihow.com", "glassdoor.com", "indeed.com",
+            "tripadvisor.com", "trustpilot.com", "yelp.com",
+            "nytimes.com", "bbc.com", "bbc.co.uk", "reuters.com",
+            "forbes.com", "bloomberg.com", "cnbc.com", "theguardian.com",
+            "businessinsider.com", "techcrunch.com", "entrepreneur.com",
+        }
+        BLOCKED_SUFFIXES = (".gov", ".gov.uk", ".gov.au", ".gouv.fr", ".gob.es")
+
+        seen_domains = set()
+        unique_results = []
+        for row in all_results:
+            domain = (row.get("domain") or "").strip().lower()
+            if not domain:
+                continue
+            if domain in BLOCKED_DOMAINS:
+                continue
+            if any(domain.endswith(sfx) for sfx in BLOCKED_SUFFIXES):
+                continue
+            if domain not in seen_domains:
+                seen_domains.add(domain)
+                unique_results.append(row)
+
+        output = io.StringIO()
+        fieldnames = [
+            "domain", "url", "title", "description",
+            "business_name", "phone", "address", "rating",
+            "review_count", "category", "place_id",
+            "city", "country", "query", "source", "position",
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(unique_results)
+        print(f"[CloudStorage] Merged {len(search_ids)} searches → {len(unique_results)} unique domains")
+        return output.getvalue()
 
     def get_results_as_csv(self, search_id: str) -> Optional[str]:
         """
