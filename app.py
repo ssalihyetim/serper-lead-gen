@@ -859,20 +859,51 @@ def show_execution_step(serper_key):
     pages_per_query = config.get('pages_per_query', 1)
     search_type = config.get('search_type', 'Both (Recommended)')
 
+    # Check if this is a resume — adjust estimates for remaining work
+    is_resume = 'resume_search_id' in st.session_state
+    remaining_search_cities = total_selected_cities
+    remaining_maps_cities = total_selected_cities
+    already_done_search = set()
+    already_done_maps = set()
+
+    if is_resume:
+        cs = get_cloud_storage()
+        resume_id = st.session_state.get('resume_search_id')
+        if resume_id and cs.available:
+            already_done_search = cs.get_completed_cities(resume_id, source='search')
+            already_done_maps = cs.get_completed_cities(resume_id, source='maps')
+            # Count how many selected cities are already done
+            all_city_keys = set()
+            for country_code, city_list in selected_cities_dict.items():
+                for city_name in city_list:
+                    all_city_keys.add(f"{city_name}, {country_code}")
+            remaining_search_cities = len(all_city_keys - already_done_search)
+            remaining_maps_cities = len(all_city_keys - already_done_maps)
+
     # Calculate API calls based on search type
     search_api_calls = 0
     maps_api_calls = 0
 
     if search_type in ["Both (Recommended)", "Search API Only"]:
-        search_api_calls = len(selected_queries) * total_selected_cities * pages_per_query
+        search_api_calls = len(selected_queries) * remaining_search_cities * pages_per_query
 
     if search_type in ["Both (Recommended)", "Maps API Only"]:
-        maps_api_calls = len(selected_queries) * total_selected_cities * pages_per_query
+        maps_api_calls = len(selected_queries) * remaining_maps_cities * pages_per_query
 
     total_estimated_calls = search_api_calls + maps_api_calls
 
     # Build execution plan message
-    plan_message = f"""**Execution Plan:**
+    if is_resume:
+        plan_message = f"""**Execution Plan (RESUME):**
+- {len(selected_queries)} selected queries
+- {total_selected_cities} total cities across {len(config['countries'])} countries
+- Search API: **{remaining_search_cities} cities remaining** ({len(already_done_search)} already done)
+- Maps API: **{remaining_maps_cities} cities remaining** ({len(already_done_maps)} already done)
+- {pages_per_query} pages per query
+- Search type: {search_type}
+"""
+    else:
+        plan_message = f"""**Execution Plan:**
 - {len(selected_queries)} selected queries
 - {total_selected_cities} selected cities across {len(config['countries'])} countries
 - {pages_per_query} pages per query
