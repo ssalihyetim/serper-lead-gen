@@ -155,8 +155,25 @@ def main():
                         if countries_list:
                             st.caption(f"Countries: {', '.join(countries_list)}")
 
-                        # Resume button for interrupted searches
-                        if status == "interrupted":
+                        # Resume button for interrupted OR stale running searches
+                        can_resume = status in ("interrupted", "running")
+                        if can_resume:
+                            # Auto-mark stale "running" searches as interrupted
+                            # (Streamlit Cloud kill doesn't trigger except block)
+                            if status == "running":
+                                from datetime import datetime as _dt
+                                started_at = s.get('started_at', '')
+                                if started_at:
+                                    try:
+                                        start_time = _dt.fromisoformat(started_at.replace('Z', '+00:00'))
+                                        elapsed_min = (_dt.now(start_time.tzinfo) - start_time).total_seconds() / 60
+                                        if elapsed_min > 10:
+                                            # Stale — mark as interrupted automatically
+                                            cs.complete_search(s['id'], total_results=s.get('total_results', 0), api_calls_used=0, status='interrupted')
+                                            status = "interrupted"
+                                    except Exception:
+                                        pass
+
                             notes_raw = s.get('notes')
                             if notes_raw:
                                 try:
