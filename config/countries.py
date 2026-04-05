@@ -154,9 +154,9 @@ COUNTRIES = {
 
     # North Africa
     "EG": {"name": "Egypt", "code": "eg", "language": "ar", "currency": "EGP"},
-    "DZ": {"name": "Algeria", "code": "dz", "language": "ar", "currency": "DZD"},
-    "MA": {"name": "Morocco", "code": "ma", "language": "ar", "currency": "MAD"},
-    "TN": {"name": "Tunisia", "code": "tn", "language": "ar", "currency": "TND"},
+    "DZ": {"name": "Algeria", "code": "dz", "language": "fr", "currency": "DZD"},
+    "MA": {"name": "Morocco", "code": "ma", "language": "fr", "currency": "MAD"},
+    "TN": {"name": "Tunisia", "code": "tn", "language": "fr", "currency": "TND"},
     "LY": {"name": "Libya", "code": "ly", "language": "ar", "currency": "LYD"},
     "SD": {"name": "Sudan", "code": "sd", "language": "ar", "currency": "SDG"},
 
