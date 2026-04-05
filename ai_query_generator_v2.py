@@ -118,8 +118,9 @@ For each query:
 - Assign priority: HIGH (strongest buyer signals), MEDIUM (relevant), LOW (exploratory)
 - Provide clear reasoning: WHY this query identifies the target customer
 - If native language enabled, provide accurate translations for EVERY target country code
-- NEVER use "N/A" for translations — always provide a valid search query in the country's business language
+- NEVER use "N/A", "null", or empty strings for translations — always provide a valid, searchable query
 - If the query_template is already in the target country's language, repeat it as-is in the translations
+- If you cannot translate to a rare language (e.g. Turkmen, Kazakh), use the country's dominant business language instead (e.g. Russian for Central Asia, French for North/West Africa, English as last resort)
 - The translations dict MUST include an entry for EVERY country code in the target countries list
 
 **STEP 4: SELECT CITIES**
