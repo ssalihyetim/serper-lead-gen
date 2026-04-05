@@ -1091,6 +1091,8 @@ def show_execution_step(serper_key):
                             query_template = query.get('query_template', '')
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
+                            if not query_text or query_text.upper() == 'N/A':
+                                query_text = query_template
                             # Clean query + city, exclusions appended separately
                             query_with_city = f"{query_text} {city_name} {full_exclusion_str}"
 
@@ -1133,6 +1135,8 @@ def show_execution_step(serper_key):
                             query_template = query.get('query_template', '')
                             translations = query.get('translations', {})
                             query_text = translations.get(country, query_template)
+                            if not query_text or query_text.upper() == 'N/A':
+                                query_text = query_template
                             # Do NOT append city name here — serper_maps.py already
                             # builds "query in location" from the location parameter.
 
